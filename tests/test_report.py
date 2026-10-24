@@ -341,6 +341,13 @@ class MarketReportTests(unittest.TestCase):
         self.assertIn("Matches", page)
         self.assertIn("⚑", page)
         self.assertIn("mkt", page)
+        self.assertIn("Report card", page)
+
+    def test_build_logs_projections(self):
+        self.quotes()
+        build_report(self.conn, self.cfg, NOW)
+        n = self.conn.execute("SELECT COUNT(*) FROM projection_log WHERE gw = 9 AND v2 IS NOT NULL").fetchone()[0]
+        self.assertGreater(n, 0)
 
 
 class LiveReportTests(unittest.TestCase):

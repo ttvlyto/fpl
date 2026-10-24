@@ -24,6 +24,7 @@ from .models import PlayerCtx
 from .pricing import fixture_odds
 from .projection import project
 from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
+from .report_card import log_projections, score_weeks, summary
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
 from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points, sleeper_weeks
 
@@ -214,6 +215,11 @@ def build_report(conn, cfg, now):
     swaps = swap_tips(roster, free_agents, slots, cfg.slot_eligibility, cfg.swap_min_gain, cfg.max_swaps)
     ranked = rank_free_agents(free_agents, cfg.free_agents_per_position)
 
+    made_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if use_sleeper and gw.gw:
+        listed = [pl for group in ranked.values() for pl in group]
+        log_projections(conn, sleeper_season, gw.gw, roster + listed, made_at)
+    card = score_weeks(conn, sleeper_season, scoring, last_finished) if use_sleeper else []
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
                        {p["player_id"]: p for p in players}, sleeper_season, fodds)
     target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
@@ -225,6 +231,8 @@ def build_report(conn, cfg, now):
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "live": live,
+        "report_card": {"weeks": [{k: (round(v, 2) if isinstance(v, float) else v) for k, v in w.items()}
+                                  for w in card[-8:]], "summary": summary(card)},
         "matches": matches,
         "markets_unmatched": markets_unmatched,
         "projection_note": note,
@@ -419,6 +427,22 @@ _FLAG_TEXT = {
 }
 
 
+def _report_card(r):
+    rc = r.get("report_card") or {}
+    rows = "".join(
+        f'<tr><td>GW{w["gw"]}</td><td class="num">{w["n"]}</td><td class="num">{_num(w["mae_v1"])}</td>'
+        f'<td class="num">{_num(w["mae_v2"])}</td>'
+        f'<td class="num">{"–" if w["brier_goal"] is None else format(w["brier_goal"], ".3f")} '
+        f'<small>({w["n_goal"]})</small></td></tr>' for w in rc.get("weeks", []))
+    head = ('<tr><th>Week</th><th class="num">Players</th><th class="num">Avg miss v1</th>'
+            '<th class="num">Avg miss v2</th><th class="num">Goal-odds score</th></tr>')
+    table = f'<div class="scroll"><table><thead>{head}</thead><tbody>{rows}</tbody></table></div>' if rows else ""
+    return (f'<div class="card"><h2>Report card</h2>{table}<div class="muted" style="margin-top:6px">'
+            f'{_e(rc.get("summary", "not enough weeks yet"))}. Avg miss = average points the projection was off by '
+            f'(lower is better). Goal-odds score = how well market goal odds predicted scorers (Brier; lower is better).'
+            f'</div></div>')
+
+
 def _live_card(r):
     live = r.get("live")
     if not live:
@@ -526,6 +550,7 @@ def render_html(report):
     fa.append("</div>")
     parts.append("".join(fa))
 
+    parts.append(_report_card(r))
     um = r["unmatched_rostered"]
     um_list = "".join(f"<li>{_e(p['name'])} <small>{_e(p['club'])}</small></li>" for p in um)
     parts.append(f'<div class="card"><h2>Unmatched</h2><div class="muted">{r["unmatched_count"]} Sleeper players have no FPL match '
