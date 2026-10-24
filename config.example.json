@@ -1,0 +1,34 @@
+{
+  "league_id": "YOUR_LEAGUE_ID",
+  "owner": "YOUR_SLEEPER_DISPLAY_NAME",
+  "db_path": "data/fpl.db",
+  "output_dir": "site",
+  "scoring_map_path": "scoring_map.json",
+  "overrides_path": "overrides.json",
+  "difficulty_multipliers": {
+    "1": 1.2,
+    "2": 1.1,
+    "3": 1.0,
+    "4": 0.9,
+    "5": 0.8
+  },
+  "avg_window": 5,
+  "free_agents_per_position": 10,
+  "swap_min_gain": 1.0,
+  "max_swaps": 3,
+  "slot_eligibility": {
+    "GK": [
+      "GK"
+    ],
+    "DEF": [
+      "DEF"
+    ],
+    "MID": [
+      "MID"
+    ],
+    "FWD": [
+      "FWD"
+    ]
+  },
+  "fpl_request_interval": 0.5
+}
