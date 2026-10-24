@@ -29,10 +29,14 @@ CREATE TABLE IF NOT EXISTS fpl_history (
     minutes INTEGER, stats_json TEXT, fetched_at TEXT,
     PRIMARY KEY (season, fpl_id, fixture_id)
 );
+CREATE TABLE IF NOT EXISTS sleeper_stats (
+    season TEXT, week INTEGER, player_id TEXT, stats_json TEXT, fetched_at TEXT,
+    PRIMARY KEY (season, week, player_id)
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
-TABLES = set(SNAPSHOT_TABLES) | {"fpl_history", "meta"}
+TABLES = set(SNAPSHOT_TABLES) | {"fpl_history", "sleeper_stats", "meta"}
 
 
 def now_iso():

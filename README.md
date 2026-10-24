@@ -8,8 +8,10 @@ Fantasy Premier League site, then builds one web page with:
   claims once the match week has started,
 - the **top free agents** per position, with Sleeper trending adds.
 
-Points are calculated with **your league's scoring**, using the editable
-`scoring_map.json`. Design: `docs/superpowers/specs/2026-10-24-fpl-rankings-design.md`.
+Points are **your league's exact scoring**, calculated from Sleeper's own
+weekly stats. If those aren't available (or you set `"stats_source": "fpl"`),
+it falls back to FPL stats mapped through the editable `scoring_map.json`,
+which covers only part of the league's scoring. Design: `docs/superpowers/specs/2026-10-24-fpl-rankings-design.md`.
 
 Python 3.10+, standard library only. Nothing to install.
 
@@ -47,6 +49,8 @@ Open `site/index.html` in a browser.
 | `swap_min_gain` | 1.0 | minimum gain before a swap is suggested |
 | `max_swaps` | 3 | swap tips shown |
 | `free_agents_per_position` | 10 | free agents listed per position |
+| `stats_source` | `"sleeper"` | `"sleeper"` = exact league points from Sleeper's stats; `"fpl"` = approximate, via `scoring_map.json` |
+| `undroppable` | `[]` | players never suggested as drops, by name or Sleeper id, e.g. `["Bukayo Saka"]`. Shown with a 🔒 |
 | `slot_eligibility` | GK/DEF/MID/FWD | which positions can fill each lineup slot. If `build` names an unknown slot (a flex slot, say), add it here, e.g. `"FLEX": ["DEF", "MID", "FWD"]` |
 
 **`scoring_map.json`**: how FPL stats turn into your league's points.

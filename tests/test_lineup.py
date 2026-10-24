@@ -162,5 +162,13 @@ class ReviewFixLineupTests(unittest.TestCase):
         self.assertNotIn("D1", [t.drop.sleeper_id for t in tips])
 
 
+class UndroppableTests(unittest.TestCase):
+    def test_undroppable_never_suggested_as_drop(self):
+        keep = p("S", "MID", 0)
+        keep.undroppable = True
+        tips = swap_tips([keep, p("M", "MID", 3)], [fa("F", "MID", 9)], ["MID", "MID"], ELIG, 1.0, 3)
+        self.assertEqual([t.drop.sleeper_id for t in tips], ["M"])
+
+
 if __name__ == "__main__":
     unittest.main()

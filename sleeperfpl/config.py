@@ -23,7 +23,10 @@ DEFAULTS = {
                          "FM_FLEX": ["F", "M"], "MD_FLEX": ["M", "D", "DEF"], "FMD_FLEX": ["F", "M", "D", "DEF"],
                          "DEF": ["D", "DEF"], "MID": ["M", "MID"], "FWD": ["F", "FWD"]},
     "fpl_request_interval": 0.5,
+    "stats_source": "sleeper",     # "sleeper" (exact league points) or "fpl" (approximate, via scoring_map.json)
+    "undroppable": [],             # player names or Sleeper ids never suggested as drops
 }
+STATS_SOURCES = ("sleeper", "fpl")
 REQUIRED = ("league_id", "owner")
 PATH_KEYS = ("db_path", "output_dir", "scoring_map_path", "overrides_path")
 
@@ -47,6 +50,8 @@ class Config:
     max_swaps: int
     slot_eligibility: dict[str, list[str]]
     fpl_request_interval: float
+    stats_source: str = "sleeper"
+    undroppable: list = None
 
 
 def load_config(path: str | None = None) -> Config:
@@ -69,6 +74,11 @@ def load_config(path: str | None = None) -> Config:
     # Partial multiplier overrides keep the defaults for the other levels.
     multipliers = {**DEFAULTS["difficulty_multipliers"], **raw.get("difficulty_multipliers", {})}
 
+    if merged["stats_source"] not in STATS_SOURCES:
+        raise ConfigError(f"{cfg_path}: stats_source must be one of {', '.join(STATS_SOURCES)}")
+    if not isinstance(merged["undroppable"], list) or not all(isinstance(x, str) for x in merged["undroppable"]):
+        raise ConfigError(f'{cfg_path}: undroppable must be a list of names or ids, e.g. ["Bukayo Saka"]')
+
     base = cfg_path.resolve().parent
     paths = {k: base / merged[k] for k in PATH_KEYS}
     try:
@@ -82,6 +92,8 @@ def load_config(path: str | None = None) -> Config:
             max_swaps=int(merged["max_swaps"]),
             slot_eligibility={str(k): list(v) for k, v in merged["slot_eligibility"].items()},
             fpl_request_interval=float(merged["fpl_request_interval"]),
+            stats_source=merged["stats_source"],
+            undroppable=list(merged["undroppable"]),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:

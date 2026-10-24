@@ -58,5 +58,7 @@
       "FWD"
     ]
   },
-  "fpl_request_interval": 0.5
+  "fpl_request_interval": 0.5,
+  "stats_source": "sleeper",
+  "undroppable": []
 }

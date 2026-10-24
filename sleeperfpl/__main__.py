@@ -11,6 +11,7 @@ from .fetch_fpl import fetch_bootstrap, fetch_fixtures, fetch_history
 from .fetch_sleeper import fetch_league, fetch_players, fetch_rosters, fetch_trending
 from .http import FetchError
 from .report import BuildError, build_report, write_outputs
+from .sleeper_stats import fetch_sleeper_stats
 from .scoring_map import (coverage, ensure_scoring_map, league_drift, load_scoring_map, probe_sleeper_stats,
                           rule_lines)
 
@@ -38,6 +39,12 @@ def cmd_fetch_rosters(cfg, conn, args):
 
 
 def cmd_fetch_history(cfg, conn, args):
+    league = _league(conn)
+    finished = [r["event_id"] for r in latest(conn, "fpl_events") if r["finished"]]
+    weeks = fetch_sleeper_stats(conn, league["sport"], str(league.get("season", "")),
+                                max(finished) if finished else None, force=args.force)
+    print(f"sleeper stats: {weeks} week(s) fetched")
+    # FPL history stays as the backup source (stats_source "fpl", or no Sleeper stats).
     n = fetch_history(conn, force=args.force, interval=cfg.fpl_request_interval)
     print(f"fpl history: {n} players fetched" if n else "fpl history: up to date (use --force to refetch)")
 
@@ -72,7 +79,7 @@ def cmd_build(cfg, conn, args):
 COMMANDS = {
     "fetch-daily": (cmd_fetch_daily, "league, players, FPL bootstrap + fixtures"),
     "fetch-rosters": (cmd_fetch_rosters, "rosters + trending adds"),
-    "fetch-history": (cmd_fetch_history, "FPL match history (only after a game week finishes)"),
+    "fetch-history": (cmd_fetch_history, "Sleeper weekly stats + FPL match history (after a game week finishes)"),
     "coverage": (cmd_coverage, "how much of the league's scoring FPL covers"),
     "build": (cmd_build, "write report.json and index.html"),
 }

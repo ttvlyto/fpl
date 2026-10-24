@@ -68,5 +68,25 @@ class SleeperSlotDefaultsTests(unittest.TestCase):
         self.assertIn("DEF", elig["D"])
 
 
+class NewSettingsTests(unittest.TestCase):
+    def load(self, extra):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            path.write_text(json.dumps({"league_id": "1", "owner": "me", **extra}))
+            return load_config(str(path))
+
+    def test_defaults(self):
+        cfg = self.load({})
+        self.assertEqual((cfg.stats_source, cfg.undroppable), ("sleeper", []))
+
+    def test_bad_stats_source(self):
+        with self.assertRaisesRegex(ConfigError, "stats_source"):
+            self.load({"stats_source": "espn"})
+
+    def test_undroppable_must_be_list(self):
+        with self.assertRaisesRegex(ConfigError, "undroppable"):
+            self.load({"undroppable": "Bukayo Saka"})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,7 +62,7 @@ shows one web page with the best lineup and the best free agents.
 
 - **Prediction model** replacing or running alongside the v1 projection
   (see the swappable projection step and append-only snapshots).
-- **Sleeper per-match stats** as an alternative stats source (owner: "maybe").
+- ~~**Sleeper per-match stats** as an alternative stats source~~ — built 2026-10-24 and now the default (`stats_source: "sleeper"`): Sleeper's weekly stats use the same keys as the league's scoring, so points are exact. FPL + scoring_map.json remain the fallback. Also added: an `undroppable` list of players never suggested as drops.
 - **Claude "second opinion"**: after the scoring step, send the page's data
   (XI, swap tips, free agents, fixtures, injury flags) to Claude and show its
   notes in a section on the page. Provider is either Anthropic's API directly

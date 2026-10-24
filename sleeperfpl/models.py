@@ -27,6 +27,7 @@ class PlayerCtx:
     n: int = 0
     proj: float = 0.0
     trending_adds: int | None = None
+    undroppable: bool = False      # owner said never suggest dropping this player
 
     def value(self) -> float:
         """Blend of recent output and projection, used for bench comparisons."""

@@ -15,10 +15,11 @@ from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
 from .gameweek import season_of, target_gameweek, team_fixtures
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
-from .matching import FPL_POSITIONS, load_overrides, match_players
+from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
 from .models import PlayerCtx
 from .projection import project
-from .scoring_map import coverage, league_drift, load_scoring_map, score_match
+from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
+from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_history
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sleeper import rostered_ids  # noqa: E402
@@ -63,7 +64,7 @@ def _player_dict(pl):
     return {
         "sleeper_id": pl.sleeper_id, "name": pl.name, "positions": pl.positions, "club": pl.club,
         "flag": pl.flag, "avg": None if pl.avg is None else round(pl.avg, 1), "n": pl.n,
-        "proj": round(pl.proj, 1), "trending_adds": pl.trending_adds,
+        "proj": round(pl.proj, 1), "trending_adds": pl.trending_adds, "undroppable": pl.undroppable,
         "fixtures": [{"opponent": f.opponent, "home": f.home, "difficulty": f.difficulty, "kickoff": f.kickoff}
                      for f in pl.fixtures],
     }
@@ -79,10 +80,17 @@ def build_report(conn, cfg, now):
 
     league = json.loads(league_rows[0]["data_json"])
     slots = starting_slots(league.get("roster_positions") or [], cfg.slot_eligibility)
-    rules = load_scoring_map(cfg.scoring_map_path)
-    covered, missing = coverage(rules)
-    not_in_map, changed = league_drift(rules, league.get("scoring_settings") or {})
-    missing = sorted(set(missing) | set(not_in_map))
+    scoring = flatten_scoring_settings(league.get("scoring_settings") or {})
+    sleeper_season = str(league.get("season") or "")
+    use_sleeper = cfg.stats_source == "sleeper" and has_stats(conn, sleeper_season)
+    if use_sleeper:
+        # Exact league points straight from Sleeper's stats: nothing to approximate.
+        rules, covered, missing, changed = None, sorted(scoring), [], []
+    else:
+        rules = load_scoring_map(cfg.scoring_map_path)
+        covered, missing = coverage(rules)
+        not_in_map, changed = league_drift(rules, scoring)
+        missing = sorted(set(missing) | set(not_in_map))
 
     for r in rosters:
         for key in ("players_json", "starters_json", "reserve_json"):
@@ -118,7 +126,10 @@ def build_report(conn, cfg, now):
                        flag=_flag(p, el), fixtures=by_team.get(club, []) if el else [],
                        trending_adds=trending.get(sid))
         if el:
-            pl.history = _history(conn, season, fpl_id, FPL_POSITIONS.get(el["element_type"], ""), rules)
+            if use_sleeper:
+                pl.history = sleeper_history(conn, sleeper_season, sid, scoring)
+            else:
+                pl.history = _history(conn, season, fpl_id, FPL_POSITIONS.get(el["element_type"], ""), rules)
             pr = project(pl.history, [f.difficulty for f in pl.fixtures], pl.flag == "out",
                          cfg.difficulty_multipliers, cfg.avg_window)
             pl.avg, pl.n, pl.proj = pr.avg, pr.n, pr.proj
@@ -129,6 +140,13 @@ def build_report(conn, cfg, now):
                              fpl_id=None, on_roster=True, in_reserve=sid in reserve, flag="no data")
 
     roster = [pl for pl in ctx.values() if pl.on_roster]
+    keep_unmatched = []
+    for entry in cfg.undroppable or []:
+        hits = [pl for pl in roster if entry == pl.sleeper_id or normalize_name(entry) == normalize_name(pl.name)]
+        for pl in hits:
+            pl.undroppable = True
+        if not hits:
+            keep_unmatched.append(entry)
     free_agents = [pl for pl in ctx.values() if not pl.on_roster]
     lineup = best_xi(roster, slots, cfg.slot_eligibility)
     swaps = swap_tips(roster, free_agents, slots, cfg.slot_eligibility, cfg.swap_min_gain, cfg.max_swaps)
@@ -139,7 +157,10 @@ def build_report(conn, cfg, now):
         "gameweek": gw.gw,
         "mode": gw.mode,
         "first_kickoff": gw.first_kickoff.strftime("%Y-%m-%dT%H:%M:%SZ") if gw.first_kickoff else None,
+        "stats_source": "sleeper" if use_sleeper else "fpl",
+        "undroppable_unmatched": keep_unmatched,
         "sources": {
+            "sleeper_stats_week": meta_get(conn, SLEEPER_STATS_META),
             "sleeper_rosters": latest_fetched_at(conn, "sleeper_rosters"),
             "sleeper_players": latest_fetched_at(conn, "sleeper_players"),
             "sleeper_trending": latest_fetched_at(conn, "sleeper_trending"),
@@ -212,6 +233,8 @@ def _num(v):
 
 def _player_cells(p):
     flag = f' <span class="flag">{_e(p["flag"])}</span>' if p["flag"] else ""
+    if p.get("undroppable"):
+        flag += ' <span title="undroppable">🔒</span>'
     pos = "/".join(p["positions"])
     return (f'<td>{_e(p["name"])} <small>{_e(pos)} {_e(p["club"])}</small>{flag}</td>'
             f'<td>{_fixtures_html(p)}</td>'
@@ -234,7 +257,12 @@ def render_html(report):
     parts = [f'<h1>GW{_e(r["gameweek"] or "–")} · Best XI <span class="muted">projected {_num(r["xi"]["total"])}</span></h1>',
              f'<div class="muted">Generated {_e(r["generated_at"])} · first kickoff {_e(r["first_kickoff"] or "–")} · '
              f'pickups: {"waiver claims" if r["mode"] == "waiver" else "instant free agents"}</div>',
+             f'<div class="muted">Points: ' + ("Sleeper stats (exact league scoring)" if r.get("stats_source") == "sleeper"
+                                                else "FPL stats via scoring_map.json (approximate)") + '</div>',
              f'<div class="muted">Data as of — {asof}</div>']
+    if r.get("undroppable_unmatched"):
+        parts.append(f'<div class="card banner">undroppable in config.json matches no one on your roster: '
+                     f'{_e(", ".join(r["undroppable_unmatched"]))}</div>')
 
     if r["coverage"]["missing"]:
         parts.append(f'<div class="card banner">Approximate: {len(r["coverage"]["missing"])} scoring rule(s) have no FPL '

@@ -24,7 +24,7 @@ def make_cfg(tmp, owner="me"):
                   difficulty_multipliers={1: 1.2, 2: 1.1, 3: 1.0, 4: 0.9, 5: 0.8}, avg_window=5,
                   free_agents_per_position=10, swap_min_gain=1.0, max_swaps=3,
                   slot_eligibility={"GK": ["GK"], "DEF": ["DEF"], "MID": ["MID"], "FWD": ["FWD"]},
-                  fpl_request_interval=0)
+                  fpl_request_interval=0, stats_source="fpl", undroppable=[])
 
 
 def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
@@ -198,6 +198,54 @@ class ReviewFixReportTests(unittest.TestCase):
         self.assertIn("tackle", r["coverage"]["missing"])
         self.assertEqual(r["coverage"]["changed"], ["goal"])
         self.assertIn("goal", render_html(r))
+
+
+class SleeperSourceReportTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cfg = make_cfg(self.tmp)
+        self.cfg.stats_source = "sleeper"
+        self.conn = connect(":memory:")
+        seed(self.conn)
+        league = {"sport": "s", "season": "2026", "roster_positions": ["GK", "MID", "MID", "BN", "BN"],
+                  "scoring_settings": {"pos_m_g": 9, "pos_m_sot": 2, "pos_gk_sv": 2}}
+        self.conn.execute("UPDATE sleeper_league SET data_json = ?", (json.dumps(league),))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def add_stats(self, pid, week, stats):
+        self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', ?, ?, ?, ?)", (week, pid, json.dumps(stats), TS))
+
+    def player(self, r, name):
+        everyone = [s["player"] for s in r["xi"]["starters"] if s["player"]] + r["xi"]["bench"]
+        return next(p for p in everyone if p["name"] == name)
+
+    def test_uses_sleeper_points(self):
+        self.add_stats("s2", 6, {"pos_m_g": 1, "pos_m_sot": 2, "min": 90})   # 13
+        self.add_stats("s2", 7, {"pos_m_sot": 1, "min": 90})                 # 2
+        r = build_report(self.conn, self.cfg, NOW)
+        saka = self.player(r, "Bukayo Saka")
+        self.assertEqual((saka["avg"], saka["n"]), (7.5, 2))
+        self.assertEqual(r["stats_source"], "sleeper")
+        self.assertEqual(r["coverage"]["missing"], [])
+        self.assertNotIn("Approximate", render_html(r))
+
+    def test_falls_back_to_fpl_without_sleeper_stats(self):
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertEqual(r["stats_source"], "fpl")
+        self.assertEqual(self.player(r, "Bukayo Saka")["n"], 3)
+
+    def test_undroppable_by_name_and_unknown_warned(self):
+        self.cfg.undroppable = ["declan rice", "Nobody Here"]
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertNotIn("s3", [s["drop"]["sleeper_id"] for s in r["swaps"]])
+        self.assertTrue(self.player(r, "Declan Rice")["undroppable"])
+        self.assertEqual(r["undroppable_unmatched"], ["Nobody Here"])
+        page = render_html(r)
+        self.assertIn("Nobody Here", page)
+        self.assertIn("🔒", page)
 
 
 if __name__ == "__main__":

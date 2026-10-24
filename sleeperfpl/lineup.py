@@ -122,11 +122,11 @@ def swap_tips(roster, free_agents, slots, eligibility, min_gain, max_swaps):
     "xi": the best XI's projected total rises by at least `min_gain`.
     "bench": the XI is unchanged but a bench player is replaced by someone
     whose value() (blend of AVG and PROJ) is at least `min_gain` higher.
-    Never empties a lineup slot, never drops an unmatched or IR player.
+    Never empties a lineup slot, never drops an unmatched, IR or undroppable player.
     """
     base = best_xi(roster, slots, eligibility)
     bench_ids = {pl.sleeper_id for pl in base.bench}
-    drops = [pl for pl in roster if pl.fpl_id is not None and not pl.in_reserve]
+    drops = [pl for pl in roster if pl.fpl_id is not None and not pl.in_reserve and not pl.undroppable]
     adds = sorted((pl for pl in free_agents if pl.fpl_id is not None and pl.flag != "out"),
                   key=lambda pl: (-pl.proj, pl.name))[:SWAP_CANDIDATE_POOL]
 
