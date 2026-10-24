@@ -89,5 +89,71 @@ class BestXiTests(unittest.TestCase):
         self.assertEqual(lu.total, 15)
 
 
+
+from sleeperfpl.lineup import rank_free_agents, swap_tips  # noqa: E402
+
+
+def fa(sid, pos, proj, avg=None, **kw):
+    pl = p(sid, pos, proj, avg, **kw)
+    pl.on_roster = False
+    return pl
+
+
+class SwapTests(unittest.TestCase):
+    def tips(self, roster, fas, slots, min_gain=1.0, max_swaps=3):
+        return swap_tips(roster, fas, slots, ELIG, min_gain, max_swaps)
+
+    def test_xi_upgrade_suggested(self):
+        tips = self.tips([p("M", "MID", 2)], [fa("F", "MID", 6)], ["MID"])
+        self.assertEqual(len(tips), 1)
+        self.assertEqual((tips[0].drop.sleeper_id, tips[0].add.sleeper_id, tips[0].kind), ("M", "F", "xi"))
+        self.assertAlmostEqual(tips[0].gain, 4)
+
+    def test_below_threshold_not_suggested(self):
+        self.assertEqual(self.tips([p("M", "MID", 2)], [fa("F", "MID", 2.5)], ["MID"]), [])
+
+    def test_cross_position_swap_keeps_legal_xi(self):
+        roster = [p("G", "GK", 1), p("M", "MID", 5)]
+        tips = self.tips(roster, [fa("X", "MID", 9)], ["GK", "MID"])
+        self.assertNotIn("G", [t.drop.sleeper_id for t in tips])
+        self.assertEqual([(t.drop.sleeper_id, t.add.sleeper_id) for t in tips], [("M", "X")])
+
+    def test_bench_upgrade(self):
+        roster = [p("S", "FWD", 8), p("B", "FWD", 1, avg=1)]
+        tips = self.tips(roster, [fa("N", "FWD", 4, avg=4)], ["FWD"])
+        self.assertEqual(len(tips), 1)
+        self.assertEqual((tips[0].drop.sleeper_id, tips[0].kind), ("B", "bench"))
+        self.assertAlmostEqual(tips[0].gain, 3)
+
+    def test_unmatched_never_dropped(self):
+        roster = [p("U", "MID", 0, fpl_id=None, flag="no data")]
+        self.assertEqual(self.tips(roster, [fa("F", "MID", 9)], ["MID"]), [])
+
+    def test_out_free_agent_never_added(self):
+        self.assertEqual(self.tips([p("M", "MID", 2)], [fa("F", "MID", 9, flag="out")], ["MID"]), [])
+
+    def test_each_player_used_once_and_max_swaps(self):
+        roster = [p("M1", "MID", 1), p("M2", "MID", 2), p("M3", "MID", 3)]
+        fas = [fa("A", "MID", 9), fa("B", "MID", 8)]
+        tips = self.tips(roster, fas, ["MID", "MID", "MID"], max_swaps=5)
+        drops = [t.drop.sleeper_id for t in tips]
+        adds = [t.add.sleeper_id for t in tips]
+        self.assertEqual(len(set(drops)), len(drops))
+        self.assertEqual(sorted(adds), ["A", "B"])
+        self.assertEqual(drops[0], "M1")
+        self.assertEqual(len(self.tips(roster, fas, ["MID", "MID", "MID"], max_swaps=1)), 1)
+
+    def test_rank_free_agents_top_n_per_position(self):
+        fas = [fa(f"M{i}", "MID", float(i)) for i in range(12)]
+        fas.append(fa("OUT", "MID", 99, flag="out"))
+        fas.append(fa("U", "MID", 50, fpl_id=None))
+        fas.append(fa("D", "DEF", 3))
+        ranked = rank_free_agents(fas, 10)
+        self.assertEqual([x.sleeper_id for x in ranked["MID"]][:2], ["M11", "M10"])
+        self.assertEqual(len(ranked["MID"]), 10)
+        self.assertNotIn("OUT", [x.sleeper_id for x in ranked["MID"]])
+        self.assertEqual([x.sleeper_id for x in ranked["DEF"]], ["D"])
+
+
 if __name__ == "__main__":
     unittest.main()

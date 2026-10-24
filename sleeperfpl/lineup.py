@@ -102,3 +102,64 @@ def best_xi(players, slots, eligibility):
                    key=lambda pl: (-pl.proj, -(pl.avg or 0.0), pl.name))
     total = sum(pl.proj for _, pl in starters if pl)
     return Lineup(starters, bench, total, empty)
+
+
+@dataclass
+class Swap:
+    drop: object            # PlayerCtx
+    add: object             # PlayerCtx
+    gain: float
+    kind: str               # "xi" | "bench"
+
+
+SWAP_CANDIDATE_POOL = 40
+
+
+def swap_tips(roster, free_agents, slots, eligibility, min_gain, max_swaps):
+    """Suggest drop/add pairs that clearly improve the roster.
+
+    "xi": the best XI's projected total rises by at least `min_gain`.
+    "bench": the XI is unchanged but a bench player is replaced by someone
+    whose value() (blend of AVG and PROJ) is at least `min_gain` higher.
+    Never empties a lineup slot, never drops an unmatched or IR player.
+    """
+    base = best_xi(roster, slots, eligibility)
+    bench_ids = {pl.sleeper_id for pl in base.bench}
+    drops = [pl for pl in roster if pl.fpl_id is not None and not pl.in_reserve]
+    adds = sorted((pl for pl in free_agents if pl.fpl_id is not None and pl.flag != "out"),
+                  key=lambda pl: (-pl.proj, pl.name))[:SWAP_CANDIDATE_POOL]
+
+    candidates = []
+    for d in drops:
+        rest = [pl for pl in roster if pl.sleeper_id != d.sleeper_id]
+        for a in adds:
+            new = best_xi(rest + [a], slots, eligibility)
+            if not set(new.empty_slots) <= set(base.empty_slots):
+                continue
+            xi_gain = new.total - base.total
+            if xi_gain >= min_gain:
+                candidates.append(Swap(d, a, xi_gain, "xi"))
+            elif d.sleeper_id in bench_ids and a.value() - d.value() >= min_gain:
+                candidates.append(Swap(d, a, a.value() - d.value(), "bench"))
+
+    candidates.sort(key=lambda s: (s.kind != "xi", -s.gain, s.drop.name, s.add.name))
+    tips, used_drop, used_add = [], set(), set()
+    for s in candidates:
+        if len(tips) >= max_swaps:
+            break
+        if s.drop.sleeper_id in used_drop or s.add.sleeper_id in used_add:
+            continue
+        tips.append(s)
+        used_drop.add(s.drop.sleeper_id)
+        used_add.add(s.add.sleeper_id)
+    return tips
+
+
+def rank_free_agents(free_agents, per_position):
+    groups = {}
+    for pl in free_agents:
+        if pl.fpl_id is None or pl.flag == "out" or not pl.positions:
+            continue
+        groups.setdefault(pl.positions[0], []).append(pl)
+    return {pos: sorted(group, key=lambda pl: (-pl.proj, pl.avg is None, -(pl.avg or 0.0), pl.name))[:per_position]
+            for pos, group in groups.items()}
