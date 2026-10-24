@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from sleeperfpl.gameweek import season_of, target_gameweek, team_fixtures
+from sleeperfpl.gameweek import live_gameweek, season_of, target_gameweek, team_fixtures
 
 
 def ev(i, finished):
@@ -54,6 +54,12 @@ class SeasonOfTests(unittest.TestCase):
                   {"event_id": 38, "deadline_time": "2027-05-23T10:00:00Z"}]
         self.assertEqual(season_of(events), "2026")
         self.assertIsNone(season_of([{"event_id": 1, "deadline_time": None}]))
+
+
+class LiveGameweekTests(unittest.TestCase):
+    def test_live_gameweek(self):
+        self.assertIsNone(live_gameweek(EVENTS, FIXTURES, utc(2026, 10, 22, 20)))
+        self.assertEqual(live_gameweek(EVENTS, FIXTURES, utc(2026, 10, 24, 12)), 9)
 
 
 if __name__ == "__main__":

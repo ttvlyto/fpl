@@ -57,6 +57,14 @@ def target_gameweek(events, fixtures, now):
     return GameweekInfo(gw, "instant", kickoffs.get(gw))
 
 
+def live_gameweek(events, fixtures, now):
+    """The game week being played right now (first kickoff passed, not finished), or None."""
+    kickoffs = _first_kickoffs(fixtures)
+    live = [e["event_id"] for e in events
+            if not e["finished"] and kickoffs.get(e["event_id"]) and kickoffs[e["event_id"]] <= now]
+    return max(live) if live else None
+
+
 def team_fixtures(fixtures, teams, gw):
     """{team short_name: [Fixture, ...]} for game week `gw`, in kickoff order."""
     out = {}

@@ -14,10 +14,11 @@ from types import SimpleNamespace
 
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
-from .gameweek import season_of, target_gameweek, team_fixtures
+from .gameweek import live_gameweek, season_of, target_gameweek, team_fixtures
 from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
+from .live import unlikely_to_play, zero_minute_replacements
 from .markets import latest_quotes, mid, team_code, usable
 from .models import PlayerCtx
 from .pricing import fixture_odds
@@ -213,6 +214,8 @@ def build_report(conn, cfg, now):
     swaps = swap_tips(roster, free_agents, slots, cfg.slot_eligibility, cfg.swap_min_gain, cfg.max_swaps)
     ranked = rank_free_agents(free_agents, cfg.free_agents_per_position)
 
+    live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
+                       {p["player_id"]: p for p in players}, sleeper_season, fodds)
     target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
     matches = [_match_entry(f, teams, fodds.get(f["fixture_id"]) or all_odds.get(f["fixture_id"]),
                             f["fixture_id"] not in fodds) for f in target]
@@ -221,6 +224,7 @@ def build_report(conn, cfg, now):
 
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "live": live,
         "matches": matches,
         "markets_unmatched": markets_unmatched,
         "projection_note": note,
@@ -281,6 +285,57 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
     pl.p_goal_market = goal_quotes.get((normalize_name(pl.name), pl.club))
     if pl.p_goal_market is not None and abs(pl.p_goal_market - pl.p_goal_hist) >= cfg.flag_goal_gap:
         pl.market_flags.append("goal")
+
+
+MATCH_LENGTH = timedelta(hours=2.5)
+
+
+def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
+                players_by_id, sleeper_season, fodds):
+    gw = live_gameweek(events, fixtures, now)
+    if gw is None:
+        return None
+    started, finished_any, in_progress = set(), set(), set()
+    live_fx = [f for f in fixtures if f.get("event") == gw]
+    for f in live_fx:
+        k = parse_time(f.get("kickoff_time"))
+        for code in (teams.get(f["team_h"]), teams.get(f["team_a"])):
+            if not k or k > now:
+                continue
+            started.add(code)
+            if f.get("finished") or k + MATCH_LENGTH <= now:
+                finished_any.add(code)
+            else:
+                in_progress.add(code)
+    finished = finished_any - in_progress
+
+    starter_ids = list(mine.get("starters") or [])
+    starters = [(slot, ctx.get(sid)) for slot, sid in zip(slots, starter_ids)]
+    bench = [pl for pl in ctx.values() if pl.on_roster and pl.sleeper_id not in starter_ids]
+    minutes = {}
+    for pid, raw in conn.execute("SELECT player_id, stats_json FROM sleeper_stats WHERE season = ? AND week = ?",
+                                 (sleeper_season, gw)):
+        minutes[pid] = json.loads(raw).get("min") or 0
+    cutoff = now - timedelta(hours=cfg.market_stale_hours)
+    by_team = {}
+    for q in latest_quotes(conn, "player_quotes"):
+        fetched = parse_time(q["fetched_at"])
+        team = team_code(q["source"], q["team"], codes, overrides)
+        if fetched and fetched >= cutoff and team:
+            by_team.setdefault(team, set()).add(normalize_name(q["player"]))
+    injury = {sid: (players_by_id.get(sid) or {}).get("injury_status") for sid in starter_ids}
+    unlikely = unlikely_to_play([s for s in starters if s[1] and s[1].club not in started], by_team,
+                                {k: v for k, v in injury.items() if v})
+    reps = zero_minute_replacements(starters, bench, finished, started, minutes, cfg.slot_eligibility)
+    return {
+        "gameweek": gw,
+        "starters": [{"slot": s, "player": _player_dict(pl) if pl else None} for s, pl in starters],
+        "unlikely": unlikely,
+        "replacements": [{"starter": _player_dict(x.starter), "slot": x.slot,
+                          "bench": _player_dict(x.bench) if x.bench else None, "reason": x.reason} for x in reps],
+        "fixtures": [_match_entry(f, teams, fodds.get(f["fixture_id"]), False)
+                     for f in sorted(live_fx, key=lambda f: f.get("kickoff_time") or "")],
+    }
 
 
 # ---------------------------------------------------------------- html
@@ -357,6 +412,26 @@ _FLAG_TEXT = {
 }
 
 
+def _live_card(r):
+    live = r.get("live")
+    if not live:
+        return ""
+    items = []
+    for x in live["replacements"]:
+        if x["bench"]:
+            items.append(f'<div class="tip">{_e(x["starter"]["name"])} got 0 minutes: bring in '
+                         f'{_e(x["bench"]["name"])} at {_e(x["slot"])} before his match.</div>')
+        else:
+            items.append(f'<div class="tip">{_e(x["starter"]["name"])} got 0 minutes, but {_e(x["reason"])}.</div>')
+    for s in live["starters"]:
+        p = s["player"]
+        if p and p["sleeper_id"] in live["unlikely"]:
+            items.append(f'<div class="tip">{_e(p["name"])} may not play: {_e(live["unlikely"][p["sleeper_id"]])}.</div>')
+    if not items:
+        items.append('<div class="muted">No alerts for your starters.</div>')
+    return f'<div class="card"><h2>This week (live) — GW{_e(live["gameweek"])}</h2>{"".join(items)}</div>'
+
+
 def _matches_card(r):
     rows = []
     for m in r.get("matches", []):
@@ -409,6 +484,7 @@ def render_html(report):
         parts.append(f'<div class="card banner">Approximate: {len(r["coverage"]["missing"])} scoring rule(s) have no FPL '
                      f'stat and are left out: {_e(", ".join(r["coverage"]["missing"]))}. Edit scoring_map.json to map them.</div>')
 
+    parts.append(_live_card(r))
     parts.append(_matches_card(r))
     if r["coverage"].get("changed"):
         parts.append(f'<div class="card banner">League points changed for: {_e(", ".join(r["coverage"]["changed"]))}. '

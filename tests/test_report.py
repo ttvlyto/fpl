@@ -343,5 +343,39 @@ class MarketReportTests(unittest.TestCase):
         self.assertIn("mkt", page)
 
 
+class LiveReportTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cfg = make_cfg(self.tmp)
+        self.cfg.stats_source = "sleeper"
+        self.conn = connect(":memory:")
+        seed(self.conn)
+        league = {"sport": "s", "season": "2026", "roster_positions": ["GK", "MID", "MID", "BN", "BN"],
+                  "scoring_settings": {"pos_m_g": 9}}
+        self.conn.execute("UPDATE sleeper_league SET data_json = ?", (json.dumps(league),))
+        self.conn.execute("UPDATE sleeper_rosters SET starters_json = ? WHERE owner_id = 'u1'",
+                          (json.dumps(["s1", "s2", "s3"]),))
+        for pid, minutes in (("s1", 90), ("s2", 0), ("s3", 90)):
+            self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, ?, ?, ?)",
+                              (pid, json.dumps({"min": minutes}), TS))
+        self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 7, 's2', ?, ?)", (json.dumps({"min": 90}), TS))
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_report_live_block_only_when_in_progress(self):
+        self.assertIsNone(build_report(self.conn, self.cfg, NOW)["live"])
+        after = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
+        r = build_report(self.conn, self.cfg, after)
+        live = r["live"]
+        self.assertEqual(live["gameweek"], 9)
+        self.assertEqual([s["player"]["sleeper_id"] for s in live["starters"]], ["s1", "s2", "s3"])
+        self.assertEqual([x["starter"]["sleeper_id"] for x in live["replacements"]], ["s2"])
+        self.assertIsNone(live["replacements"][0]["bench"])
+        page = render_html(r)
+        self.assertIn("This week (live)", page)
+
+
 if __name__ == "__main__":
     unittest.main()
