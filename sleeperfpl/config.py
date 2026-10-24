@@ -25,6 +25,15 @@ DEFAULTS = {
     "fpl_request_interval": 0.5,
     "stats_source": "sleeper",     # "sleeper" (exact league points) or "fpl" (approximate, via scoring_map.json)
     "undroppable": [],             # player names or Sleeper ids never suggested as drops
+    # Betting markets: ignore quotes wider than this spread or thinner than this depth
+    # (Kalshi: contracts at the best bid+ask; Polymarket: USD liquidity).
+    "market_max_spread": 0.10,
+    "market_min_depth": {"kalshi": 50, "polymarket": 1000},
+    "market_stale_hours": 24,      # older prices are shown as stale and not used
+    "matchday_window_hours": 3,    # match-day runs refresh fixtures kicking off this soon
+    "league_avg_goals": 1.35,      # team expected-goals baseline when no market history exists
+    "flag_cs_gap": 0.25,           # flag when history and market clean-sheet chances differ this much
+    "flag_goal_gap": 0.20,         # same for a player's chance to score
 }
 STATS_SOURCES = ("sleeper", "fpl")
 REQUIRED = ("league_id", "owner")
@@ -52,6 +61,13 @@ class Config:
     fpl_request_interval: float
     stats_source: str = "sleeper"
     undroppable: list = None
+    market_max_spread: float = 0.10
+    market_min_depth: dict = None
+    market_stale_hours: float = 24
+    matchday_window_hours: float = 3
+    league_avg_goals: float = 1.35
+    flag_cs_gap: float = 0.25
+    flag_goal_gap: float = 0.20
 
 
 def load_config(path: str | None = None) -> Config:
@@ -94,6 +110,14 @@ def load_config(path: str | None = None) -> Config:
             fpl_request_interval=float(merged["fpl_request_interval"]),
             stats_source=merged["stats_source"],
             undroppable=list(merged["undroppable"]),
+            market_max_spread=float(merged["market_max_spread"]),
+            market_min_depth={**DEFAULTS["market_min_depth"],
+                              **{str(k): float(v) for k, v in raw.get("market_min_depth", {}).items()}},
+            market_stale_hours=float(merged["market_stale_hours"]),
+            matchday_window_hours=float(merged["matchday_window_hours"]),
+            league_avg_goals=float(merged["league_avg_goals"]),
+            flag_cs_gap=float(merged["flag_cs_gap"]),
+            flag_goal_gap=float(merged["flag_goal_gap"]),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:

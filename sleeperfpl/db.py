@@ -20,6 +20,10 @@ SNAPSHOT_TABLES = {
     "fpl_events": "fetched_at, event_id, deadline_time, finished",
     "fpl_fixtures": ("fetched_at, fixture_id, event, team_h, team_a, team_h_difficulty, "
                      "team_a_difficulty, kickoff_time, finished"),
+    # Betting markets. market: 1x2 | total | team_total | btts; side: team code, draw, over or yes.
+    "market_quotes": "fetched_at, source, home, away, kickoff, market, line, side, bid, ask, depth, ref",
+    # Player markets: goal1 | goal2 | soa.
+    "player_quotes": "fetched_at, source, home, away, kickoff, player, team, market, bid, ask, last, depth, ref",
 }
 
 OTHER_SCHEMA = """

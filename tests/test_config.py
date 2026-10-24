@@ -88,5 +88,17 @@ class NewSettingsTests(unittest.TestCase):
             self.load({"undroppable": "Bukayo Saka"})
 
 
+class MarketConfigTests(unittest.TestCase):
+    def test_config_market_defaults(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            path.write_text(json.dumps({"league_id": "1", "owner": "me"}))
+            cfg = load_config(str(path))
+        self.assertEqual(cfg.market_max_spread, 0.10)
+        self.assertEqual(cfg.market_min_depth, {"kalshi": 50, "polymarket": 1000})
+        self.assertEqual((cfg.market_stale_hours, cfg.matchday_window_hours, cfg.league_avg_goals), (24, 3, 1.35))
+        self.assertEqual((cfg.flag_cs_gap, cfg.flag_goal_gap), (0.25, 0.20))
+
+
 if __name__ == "__main__":
     unittest.main()
