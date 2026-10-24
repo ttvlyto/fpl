@@ -56,5 +56,17 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.difficulty_multipliers[1], 1.5)
 
 
+class SleeperSlotDefaultsTests(unittest.TestCase):
+    def test_default_slots_cover_sleeper_soccer(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "config.json"
+            path.write_text(json.dumps({"league_id": "1", "owner": "me"}))
+            elig = load_config(str(path)).slot_eligibility
+        for slot in ("F", "M", "D", "GK", "FM_FLEX", "MD_FLEX", "FMD_FLEX"):
+            self.assertIn(slot, elig)
+        self.assertEqual(sorted(elig["FMD_FLEX"]), ["D", "DEF", "F", "M"])
+        self.assertIn("DEF", elig["D"])
+
+
 if __name__ == "__main__":
     unittest.main()

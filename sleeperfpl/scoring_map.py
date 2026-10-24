@@ -24,13 +24,14 @@ FPL_FIELDS = ["minutes", "starts", "goals_scored", "assists", "clean_sheets", "g
 # containing any exclude word skips that suggestion.
 SUGGESTIONS = [
     (("own_goal",), "own_goals", ()),
-    (("pen_save", "penalty_save", "pk_save", "ps", "pks"), "penalties_saved", ()),
-    (("pen_miss", "penalty_miss", "pk_miss", "pm", "pkm"), "penalties_missed", ()),
+    (("pen_save", "penalty_save", "penalty_kick_save", "pk_save", "ps", "pks"), "penalties_saved", ()),
+    (("pen_miss", "penalty_miss", "penalty_kick_miss", "penalty_kicks_miss", "pk_miss", "pm", "pkm"),
+     "penalties_missed", ()),
     (("clean_sheet", "cs"), "clean_sheets", ()),
     (("conced", "against", "ga"), "goals_conceded", ()),
     (("goal",), "goals_scored", ("shot", "error", "keeper", "attempt", "chance")),
     (("assist", "ast"), "assists", ()),
-    (("yellow", "yc"), "yellow_cards", ()),
+    (("yellow", "yc"), "yellow_cards", ("second",)),
     (("red", "rc"), "red_cards", ()),
     (("save",), "saves", ()),
     (("bonus",), "bonus", ()),
@@ -41,6 +42,23 @@ SUGGESTIONS = [
     (("minute", "min", "appear", "app"), "minutes", ()),
 ]
 POSITION_SUFFIXES = {"gk": "GK", "def": "DEF", "mid": "MID", "fwd": "FWD"}
+# Sleeper's real keys look like "pos_d_g": a position prefix, then a stat code.
+SLEEPER_POSITIONS = {"gk": "GK", "d": "DEF", "m": "MID", "f": "FWD"}
+# Stat code -> FPL field, or None where FPL has no equivalent. Decoded against the
+# league's scoring screen.
+SLEEPER_CODES = {
+    "g": "goals_scored", "at": "assists", "cs": "clean_sheets", "ga": "goals_conceded",
+    "og": "own_goals", "pks": "penalties_saved", "pkm": "penalties_missed",
+    "yc": "yellow_cards", "rc": "red_cards", "sv": "saves", "tkw": "tackles",
+    "int": "clearances_blocks_interceptions",   # FPL combines clearances, blocks, interceptions
+    "min": "minutes",
+    "bs": None, "clr": None,                    # inside the combined FPL stat above
+    "yc2": None,                                # FPL records a second yellow as a red card
+    "sot": None, "kp": None, "cos": None, "acnc": None, "aer": None, "dis": None,
+    "pkd": None, "hcs": None, "sm": None, "cs90": None,
+}
+# Sleeper soccer groups scoring by position: {"forward": {"goals": 9, ...}, ...}
+POSITION_GROUPS = {"goalkeeper": "gk", "defender": "def", "midfielder": "mid", "forward": "fwd"}
 
 
 @dataclass
@@ -65,17 +83,46 @@ def _suggest(key):
     return None
 
 
+def flatten_scoring_settings(scoring_settings):
+    """Per-position groups become suffixed keys ("goals" under "forward" -> "goals_fwd").
+    Flat settings pass through unchanged."""
+    flat = {}
+    for key, value in (scoring_settings or {}).items():
+        if isinstance(value, dict):
+            suffix = POSITION_GROUPS.get(key.lower(), key.lower())
+            for stat, points in value.items():
+                flat[f"{stat}_{suffix}"] = points
+        else:
+            flat[key] = value
+    return flat
+
+
 def generate_scoring_map(scoring_settings):
+    scoring_settings = flatten_scoring_settings(scoring_settings)
     rules = {}
+    claimed = set()  # (fpl_field, position): one FPL stat is counted once per position (minutes
+                     # thresholds excepted: "appeared" and "60+ minutes" are separate rules)
     for key in sorted(scoring_settings):
-        rule = {"fpl_field": _suggest(key), "points": scoring_settings[key]}
+        sleeper = re.fullmatch(r"pos_(gk|d|m|f)_(\w+)", key.lower())
+        if sleeper and sleeper.group(2) in SLEEPER_CODES:
+            field = SLEEPER_CODES[sleeper.group(2)]
+        else:
+            field = _suggest(sleeper.group(2) if sleeper else key)
+        rule = {"fpl_field": field, "points": scoring_settings[key]}
         if rule["fpl_field"] == "minutes":
             # Never points-per-minute: award once at the number in the key (min_60), else on appearing.
             digits = re.findall(r"\d+", key)
             rule["min"] = int(digits[0]) if digits else 1
         suffix = key.lower().rsplit("_", 1)[-1]
-        if "_" in key and suffix in POSITION_SUFFIXES:
+        if sleeper:
+            rule["positions"] = [SLEEPER_POSITIONS[sleeper.group(1)]]
+        elif "_" in key and suffix in POSITION_SUFFIXES:
             rule["positions"] = [POSITION_SUFFIXES[suffix]]
+        slot = (rule["fpl_field"], tuple(rule.get("positions") or ()))
+        if rule["fpl_field"] and rule["fpl_field"] != "minutes" and slot in claimed:
+            rule = {"fpl_field": None, "points": rule["points"], **({"positions": rule["positions"]} if "positions" in rule else {})}
+        elif rule["fpl_field"]:
+            claimed.add(slot)
         rules[key] = rule
     return {"rules": rules}
 
@@ -148,6 +195,7 @@ def coverage(rules):
 
 def league_drift(rules, scoring_settings):
     """(league keys missing from the map, keys whose points differ from the league)."""
+    scoring_settings = flatten_scoring_settings(scoring_settings)
     by_key = {r.key: r for r in rules}
     not_in_map = sorted(k for k in scoring_settings if k not in by_key)
     changed = sorted(k for k, v in scoring_settings.items()

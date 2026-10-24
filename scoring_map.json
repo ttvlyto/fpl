@@ -1,0 +1,740 @@
+{
+  "rules": {
+    "pos_d_acnc": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_aer": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_at": {
+      "fpl_field": "assists",
+      "points": 7.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_bs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_clr": {
+      "fpl_field": null,
+      "points": 0.25,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_cos": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_cs": {
+      "fpl_field": "clean_sheets",
+      "points": 6.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_cs90": {
+      "fpl_field": null,
+      "points": 0.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_dis": {
+      "fpl_field": null,
+      "points": -0.5,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_g": {
+      "fpl_field": "goals_scored",
+      "points": 10.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_ga": {
+      "fpl_field": "goals_conceded",
+      "points": -2.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_hcs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_int": {
+      "fpl_field": "clearances_blocks_interceptions",
+      "points": 0.5,
+      "positions": [
+        "DEF"
+      ],
+      "note": "approximation: FPL counts clearances, blocks and interceptions as one stat. Your league pays 1 for blocks/interceptions but 0.25 for clearances, and clearances are most of a defender's count, so 0.5 per action is a blend. Raise or lower it if defenders look over- or under-rated."
+    },
+    "pos_d_kp": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_min": {
+      "fpl_field": "minutes",
+      "points": 0.0,
+      "min": 1,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_og": {
+      "fpl_field": "own_goals",
+      "points": -5.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_pkd": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_pkm": {
+      "fpl_field": "penalties_missed",
+      "points": -4.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_pks": {
+      "fpl_field": "penalties_saved",
+      "points": 8.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_rc": {
+      "fpl_field": "red_cards",
+      "points": -7.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_sm": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_sot": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_sv": {
+      "fpl_field": "saves",
+      "points": 2.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_tkw": {
+      "fpl_field": "tackles",
+      "points": 1.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_yc": {
+      "fpl_field": "yellow_cards",
+      "points": -2.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_d_yc2": {
+      "fpl_field": null,
+      "points": -5.0,
+      "positions": [
+        "DEF"
+      ]
+    },
+    "pos_f_acnc": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_aer": {
+      "fpl_field": null,
+      "points": 0.5,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_at": {
+      "fpl_field": "assists",
+      "points": 6.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_bs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_clr": {
+      "fpl_field": null,
+      "points": 0.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_cos": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_cs": {
+      "fpl_field": "clean_sheets",
+      "points": 0.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_cs90": {
+      "fpl_field": null,
+      "points": 0.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_dis": {
+      "fpl_field": null,
+      "points": -0.5,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_g": {
+      "fpl_field": "goals_scored",
+      "points": 9.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_ga": {
+      "fpl_field": "goals_conceded",
+      "points": 0.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_hcs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_int": {
+      "fpl_field": "clearances_blocks_interceptions",
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ],
+      "note": "FPL's combined clearances+blocks+interceptions stat; blocks and interceptions both pay 1 for this position."
+    },
+    "pos_f_kp": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_min": {
+      "fpl_field": "minutes",
+      "points": 0.0,
+      "min": 1,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_og": {
+      "fpl_field": "own_goals",
+      "points": -5.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_pkd": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_pkm": {
+      "fpl_field": "penalties_missed",
+      "points": -4.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_pks": {
+      "fpl_field": "penalties_saved",
+      "points": 8.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_rc": {
+      "fpl_field": "red_cards",
+      "points": -7.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_sm": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_sot": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_sv": {
+      "fpl_field": "saves",
+      "points": 2.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_tkw": {
+      "fpl_field": "tackles",
+      "points": 1.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_yc": {
+      "fpl_field": "yellow_cards",
+      "points": -2.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_f_yc2": {
+      "fpl_field": null,
+      "points": -5.0,
+      "positions": [
+        "FWD"
+      ]
+    },
+    "pos_gk_acnc": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_aer": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_at": {
+      "fpl_field": "assists",
+      "points": 7.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_bs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_clr": {
+      "fpl_field": null,
+      "points": 0.25,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_cos": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_cs": {
+      "fpl_field": "clean_sheets",
+      "points": 8.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_cs90": {
+      "fpl_field": null,
+      "points": 0.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_dis": {
+      "fpl_field": null,
+      "points": -0.5,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_g": {
+      "fpl_field": "goals_scored",
+      "points": 10.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_ga": {
+      "fpl_field": "goals_conceded",
+      "points": -2.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_hcs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_int": {
+      "fpl_field": "clearances_blocks_interceptions",
+      "points": 0.5,
+      "positions": [
+        "GK"
+      ],
+      "note": "approximation: FPL counts clearances, blocks and interceptions as one stat. Your league pays 1 for blocks/interceptions but 0.25 for clearances, and clearances are most of a defender's count, so 0.5 per action is a blend. Raise or lower it if defenders look over- or under-rated."
+    },
+    "pos_gk_kp": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_min": {
+      "fpl_field": "minutes",
+      "points": 0.0,
+      "min": 1,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_og": {
+      "fpl_field": "own_goals",
+      "points": -5.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_pkd": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_pkm": {
+      "fpl_field": "penalties_missed",
+      "points": -4.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_pks": {
+      "fpl_field": "penalties_saved",
+      "points": 8.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_rc": {
+      "fpl_field": "red_cards",
+      "points": -7.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_sm": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_sot": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_sv": {
+      "fpl_field": "saves",
+      "points": 2.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_tkw": {
+      "fpl_field": "tackles",
+      "points": 1.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_yc": {
+      "fpl_field": "yellow_cards",
+      "points": -2.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_gk_yc2": {
+      "fpl_field": null,
+      "points": -5.0,
+      "positions": [
+        "GK"
+      ]
+    },
+    "pos_m_acnc": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_aer": {
+      "fpl_field": null,
+      "points": 0.5,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_at": {
+      "fpl_field": "assists",
+      "points": 6.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_bs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_clr": {
+      "fpl_field": null,
+      "points": 0.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_cos": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_cs": {
+      "fpl_field": "clean_sheets",
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_cs90": {
+      "fpl_field": null,
+      "points": 0.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_dis": {
+      "fpl_field": null,
+      "points": -0.5,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_g": {
+      "fpl_field": "goals_scored",
+      "points": 9.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_ga": {
+      "fpl_field": "goals_conceded",
+      "points": 0.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_hcs": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_int": {
+      "fpl_field": "clearances_blocks_interceptions",
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ],
+      "note": "FPL's combined clearances+blocks+interceptions stat; blocks and interceptions both pay 1 for this position."
+    },
+    "pos_m_kp": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_min": {
+      "fpl_field": "minutes",
+      "points": 0.0,
+      "min": 1,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_og": {
+      "fpl_field": "own_goals",
+      "points": -5.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_pkd": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_pkm": {
+      "fpl_field": "penalties_missed",
+      "points": -4.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_pks": {
+      "fpl_field": "penalties_saved",
+      "points": 8.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_rc": {
+      "fpl_field": "red_cards",
+      "points": -7.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_sm": {
+      "fpl_field": null,
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_sot": {
+      "fpl_field": null,
+      "points": 2.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_sv": {
+      "fpl_field": "saves",
+      "points": 2.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_tkw": {
+      "fpl_field": "tackles",
+      "points": 1.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_yc": {
+      "fpl_field": "yellow_cards",
+      "points": -2.0,
+      "positions": [
+        "MID"
+      ]
+    },
+    "pos_m_yc2": {
+      "fpl_field": null,
+      "points": -5.0,
+      "positions": [
+        "MID"
+      ]
+    }
+  }
+}

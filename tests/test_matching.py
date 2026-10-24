@@ -86,5 +86,32 @@ class MatchingTests(unittest.TestCase):
                 load_overrides(bad)
 
 
+class SleeperFormatTests(unittest.TestCase):
+    TEAMS = [{"team_id": 1, "short_name": "ARS"}, {"team_id": 2, "short_name": "CHE"}]
+    ELEMENTS = [el(1, "Bukayo", "Saka", "Saka"), el(2, "Declan", "Rice", "Rice"),
+                el(3, "David", "Raya", "Raya", etype=1), el(4, "Cole", "Palmer", "Palmer", team=2),
+                el(5, "Ben", "White", "White", etype=2), el(6, "Ben", "White", "B.White", etype=3)]
+
+    def test_numeric_club_ids_resolved_by_vote(self):
+        players = [sp("a", "Bukayo Saka", team="1037"), sp("b", "Declan Rice", team="1037"),
+                   sp("c", "David Raya", team="1037", positions=("GK",)), sp("d", "Cole Palmer", team="1020"),
+                   sp("e", "Cole Palmerson", team="1020")]
+        r = match_players(players, self.ELEMENTS, self.TEAMS, {})
+        self.assertEqual({k: r.mapping.get(k) for k in "abc"}, {"a": 1, "b": 2, "c": 3})
+        # one vote is not enough to trust a club mapping
+        self.assertNotIn("d", r.mapping)
+
+    def test_manual_club_alias_beats_vote(self):
+        players = [sp("a", "Bukayo Saka", team="1037"), sp("b", "Declan Rice", team="1037")]
+        r = match_players(players, self.ELEMENTS, self.TEAMS, {"players": {}, "clubs": {"1037": "CHE"}})
+        self.assertEqual(r.mapping, {})
+
+    def test_sleeper_position_codes_narrow_ties(self):
+        players = [sp("a", "Bukayo Saka", team="1037"), sp("b", "Declan Rice", team="1037"),
+                   sp("w", "Ben White", team="1037", positions=("D",))]
+        r = match_players(players, self.ELEMENTS, self.TEAMS, {})
+        self.assertEqual(r.mapping.get("w"), 5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from .config import ConfigError
 
 FPL_POSITIONS = {1: "GK", 2: "DEF", 3: "MID", 4: "FWD"}
+# Sleeper soccer positions -> FPL position names.
+SLEEPER_POSITIONS = {"GK": "GK", "D": "DEF", "M": "MID", "F": "FWD", "DEF": "DEF", "MID": "MID", "FWD": "FWD"}
+MIN_CLUB_VOTES = 2
 # Letters NFKD does not decompose into an ASCII base.
 _SPECIAL = str.maketrans({"ø": "o", "Ø": "o", "æ": "ae", "Æ": "ae", "ß": "ss", "đ": "d",
                           "Đ": "d", "ł": "l", "Ł": "l", "ı": "i", "œ": "oe", "Œ": "oe"})
@@ -70,11 +73,39 @@ def _steps(name):
     return [("exact", lambda e: _full(e) == name), ("last+initial", last_initial), ("web_name", web)]
 
 
+def infer_club_aliases(sleeper_players, elements, team_code, skip):
+    """Sleeper soccer uses numeric club ids. Map each to an FPL club by voting:
+    every player whose full name matches exactly one FPL player casts a vote.
+    A club needs MIN_CLUB_VOTES votes and a clear majority."""
+    by_name = {}
+    for e in elements:
+        by_name.setdefault(_full(e), []).append(e)
+    votes = {}
+    for p in sleeper_players:
+        club = p.get("team")
+        if not club or club in skip:
+            continue
+        hits = by_name.get(normalize_name(p.get("name")), [])
+        if len(hits) == 1:
+            code = team_code.get(hits[0]["team_id"])
+            votes.setdefault(club, {}).setdefault(code, 0)
+            votes[club][code] += 1
+    aliases = {}
+    for club, counts in votes.items():
+        code, n = max(counts.items(), key=lambda kv: kv[1])
+        if n >= MIN_CLUB_VOTES and n * 2 > sum(counts.values()):
+            aliases[club] = code
+    return aliases
+
+
 def match_players(sleeper_players, elements, teams, overrides):
     overrides = overrides or {}
     player_over = overrides.get("players") or {}
     club_alias = overrides.get("clubs") or {}
     team_code = {t["team_id"]: t["short_name"] for t in teams}
+    known = set(team_code.values())
+    skip = known | set(club_alias)
+    club_alias = {**infer_club_aliases(sleeper_players, elements, team_code, skip), **club_alias}
     by_club = {}
     for e in elements:
         by_club.setdefault(team_code.get(e["team_id"]), []).append(e)
@@ -88,7 +119,7 @@ def match_players(sleeper_players, elements, teams, overrides):
         club = club_alias.get(p.get("team"), p.get("team"))
         candidates = by_club.get(club, [])
         name = normalize_name(p.get("name"))
-        wanted = set(p.get("positions") or [])
+        wanted = {SLEEPER_POSITIONS.get(x, x) for x in (p.get("positions") or [])}
         for method, pred in _steps(name):
             hits = [e for e in candidates if pred(e)]
             if len(hits) > 1 and wanted:

@@ -18,7 +18,10 @@ DEFAULTS = {
     "free_agents_per_position": 10,
     "swap_min_gain": 1.0,
     "max_swaps": 3,
-    "slot_eligibility": {"GK": ["GK"], "DEF": ["DEF"], "MID": ["MID"], "FWD": ["FWD"]},
+    # Sleeper soccer slots (F/M/D/GK and flex slots); a few players are listed as "DEF".
+    "slot_eligibility": {"GK": ["GK"], "D": ["D", "DEF"], "M": ["M"], "F": ["F"],
+                         "FM_FLEX": ["F", "M"], "MD_FLEX": ["M", "D", "DEF"], "FMD_FLEX": ["F", "M", "D", "DEF"],
+                         "DEF": ["D", "DEF"], "MID": ["M", "MID"], "FWD": ["F", "FWD"]},
     "fpl_request_interval": 0.5,
 }
 REQUIRED = ("league_id", "owner")
