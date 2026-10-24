@@ -1,0 +1,5 @@
+__pycache__/
+.superpowers/
+data/
+site/
+config.json
