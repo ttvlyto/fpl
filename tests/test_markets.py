@@ -24,6 +24,11 @@ class MarketsTests(unittest.TestCase):
         self.assertIsNone(team_code("kalshi", "XYZ", codes, {}))
         self.assertEqual(team_code("polymarket", "bri", codes, {"market_teams": {"polymarket:BRI": "BHA"}}), "BHA")
 
+    def test_polymarket_builtin_aliases(self):
+        codes = {"AVL", "BHA", "MCI", "NFO"}
+        self.assertEqual([team_code("polymarket", c, codes, {}) for c in ("AST", "BRI", "MAC", "NOT")],
+                         ["AVL", "BHA", "MCI", "NFO"])
+
     def test_usable_filters_spread_and_depth(self):
         self.assertTrue(usable(q(), CFG))
         self.assertFalse(usable(q(bid=0.30, ask=0.45), CFG))

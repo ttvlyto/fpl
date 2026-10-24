@@ -3,7 +3,8 @@
 from .gameweek import parse_time
 
 KALSHI_ALIASES = {"BRI": "BHA", "CFC": "CHE", "LFC": "LIV"}
-BUILTIN_ALIASES = {"kalshi": KALSHI_ALIASES, "polymarket": {}}
+POLYMARKET_ALIASES = {"AST": "AVL", "BRI": "BHA", "MAC": "MCI", "NOT": "NFO"}
+BUILTIN_ALIASES = {"kalshi": KALSHI_ALIASES, "polymarket": POLYMARKET_ALIASES}
 MATCH_WINDOW_HOURS = 36
 
 
