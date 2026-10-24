@@ -9,6 +9,7 @@ scoring_map.json shape:
 
 import json
 import math
+import re
 from dataclasses import dataclass
 
 from .config import ConfigError
@@ -18,24 +19,26 @@ FPL_FIELDS = ["minutes", "starts", "goals_scored", "assists", "clean_sheets", "g
               "penalties_saved", "penalties_missed", "yellow_cards", "red_cards", "saves", "bonus",
               "bps", "tackles", "recoveries", "clearances_blocks_interceptions", "defensive_contribution"]
 
-# (patterns, field), first match wins. Patterns of 3 letters or fewer must equal
-# a whole "_"-separated token; longer ones match as substrings.
+# (patterns, field, excludes), first match wins. Patterns of 3 letters or fewer
+# must equal a whole "_"-separated token; longer ones match as substrings. A key
+# containing any exclude word skips that suggestion.
 SUGGESTIONS = [
-    (("own_goal",), "own_goals"),
-    (("pen_save", "penalty_save", "ps"), "penalties_saved"),
-    (("pen_miss", "penalty_miss", "pm"), "penalties_missed"),
-    (("clean_sheet", "cs"), "clean_sheets"),
-    (("conced",), "goals_conceded"),
-    (("goal",), "goals_scored"),
-    (("assist", "ast"), "assists"),
-    (("yellow", "yc"), "yellow_cards"),
-    (("red", "rc"), "red_cards"),
-    (("save",), "saves"),
-    (("bonus",), "bonus"),
-    (("tackle", "tkl"), "tackles"),
-    (("recover",), "recoveries"),
-    (("clearance", "block", "intercept"), "clearances_blocks_interceptions"),
-    (("minute", "min_", "appear"), "minutes"),
+    (("own_goal",), "own_goals", ()),
+    (("pen_save", "penalty_save", "pk_save", "ps", "pks"), "penalties_saved", ()),
+    (("pen_miss", "penalty_miss", "pk_miss", "pm", "pkm"), "penalties_missed", ()),
+    (("clean_sheet", "cs"), "clean_sheets", ()),
+    (("conced", "against", "ga"), "goals_conceded", ()),
+    (("goal",), "goals_scored", ("shot", "error", "keeper", "attempt", "chance")),
+    (("assist", "ast"), "assists", ()),
+    (("yellow", "yc"), "yellow_cards", ()),
+    (("red", "rc"), "red_cards", ()),
+    (("save",), "saves", ()),
+    (("bonus",), "bonus", ()),
+    (("tackle", "tkl"), "tackles", ()),
+    (("recover",), "recoveries", ()),
+    (("clearance", "block", "intercept"), "clearances_blocks_interceptions", ()),
+    (("start",), "starts", ()),
+    (("minute", "min", "appear", "app"), "minutes", ()),
 ]
 POSITION_SUFFIXES = {"gk": "GK", "def": "DEF", "mid": "MID", "fwd": "FWD"}
 
@@ -53,7 +56,9 @@ class ScoringRule:
 def _suggest(key):
     k = key.lower()
     tokens = k.split("_")
-    for patterns, fpl_field in SUGGESTIONS:
+    for patterns, fpl_field, excludes in SUGGESTIONS:
+        if any(x in k for x in excludes):
+            continue
         for pat in patterns:
             if (pat in tokens) if len(pat) <= 3 else (pat in k):
                 return fpl_field
@@ -64,6 +69,10 @@ def generate_scoring_map(scoring_settings):
     rules = {}
     for key in sorted(scoring_settings):
         rule = {"fpl_field": _suggest(key), "points": scoring_settings[key]}
+        if rule["fpl_field"] == "minutes":
+            # Never points-per-minute: award once at the number in the key (min_60), else on appearing.
+            digits = re.findall(r"\d+", key)
+            rule["min"] = int(digits[0]) if digits else 1
         suffix = key.lower().rsplit("_", 1)[-1]
         if "_" in key and suffix in POSITION_SUFFIXES:
             rule["positions"] = [POSITION_SUFFIXES[suffix]]
@@ -87,15 +96,26 @@ def load_scoring_map(path):
         raise ConfigError(f"{path} not found; run fetch-daily to generate it")
     except json.JSONDecodeError as e:
         raise ConfigError(f"Invalid JSON in {path}: {e}")
+    if not isinstance(raw, dict) or not isinstance(raw.get("rules", {}), dict):
+        raise ConfigError(f"{path} must look like {{\"rules\": {{\"<key>\": {{...}}}}}}")
     rules = []
-    for key, r in (raw.get("rules") or {}).items():
+    for key, r in raw.get("rules", {}).items():
+        if not isinstance(r, dict):
+            raise ConfigError(f"{path}: rule '{key}' must be an object like "
+                              '{"fpl_field": "goals_scored", "points": 6}')
         field = r.get("fpl_field")
         if field is not None and field not in FPL_FIELDS:
             raise ConfigError(f"{path}: rule '{key}' has unknown fpl_field '{field}' "
                               f"(valid: {', '.join(FPL_FIELDS)}, or null)")
+        positions = r.get("positions")
+        if positions is not None and (not isinstance(positions, list)
+                                      or not all(isinstance(x, str) for x in positions)):
+            raise ConfigError(f"{path}: rule '{key}' positions must be a list like [\"DEF\"]")
         try:
             rules.append(ScoringRule(key=key, fpl_field=field, points=float(r.get("points", 0)),
-                                     min=r.get("min"), per=r.get("per"), positions=r.get("positions")))
+                                     min=None if r.get("min") is None else float(r["min"]),
+                                     per=None if r.get("per") is None else float(r["per"]),
+                                     positions=positions))
         except (TypeError, ValueError) as e:
             raise ConfigError(f"{path}: rule '{key}' has a bad value: {e}")
     return rules
@@ -124,6 +144,28 @@ def coverage(rules):
     covered = [r.key for r in rules if r.fpl_field is not None or r.points == 0]
     missing = [r.key for r in rules if r.fpl_field is None and r.points != 0]
     return covered, missing
+
+
+def league_drift(rules, scoring_settings):
+    """(league keys missing from the map, keys whose points differ from the league)."""
+    by_key = {r.key: r for r in rules}
+    not_in_map = sorted(k for k in scoring_settings if k not in by_key)
+    changed = sorted(k for k, v in scoring_settings.items()
+                     if k in by_key and float(v) != by_key[k].points)
+    return not_in_map, changed
+
+
+def rule_lines(rules):
+    """One readable line per rule, showing the FPL stat each key was mapped to."""
+    def fmt(x):
+        return f"{x:g}" if isinstance(x, float) else str(x)
+    lines = []
+    for r in rules:
+        extra = (f" once at >= {fmt(r.min)}" if r.min is not None else "") + \
+                (f" per {fmt(r.per)}" if r.per else "") + \
+                (f" [{'/'.join(r.positions)}]" if r.positions else "")
+        lines.append(f"{r.key} -> {r.fpl_field or '(no FPL stat)'} ({fmt(r.points)}){extra}")
+    return lines
 
 
 def probe_sleeper_stats(sport, season, week, get=get_json):

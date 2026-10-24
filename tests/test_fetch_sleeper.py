@@ -33,16 +33,17 @@ class FetchSleeperTests(unittest.TestCase):
         data = json.loads(latest(self.conn, "sleeper_league")[0]["data_json"])
         self.assertEqual(data["scoring_settings"], {"goal": 6})
 
-    def test_fetch_players_skips_inactive_and_clubless(self):
+    def test_fetch_players_keeps_everyone(self):
         n = fetch_players(self.conn, "s", get=fake({"players/s": {
             "1": {"player_id": "1", "full_name": "A B", "team": "ARS", "active": True, "fantasy_positions": ["MID"]},
             "2": {"player_id": "2", "full_name": "C D", "team": None, "active": True},
             "3": {"player_id": "3", "full_name": "E F", "team": "CHE", "active": False},
         }}))
-        self.assertEqual(n, 1)
-        rows = latest(self.conn, "sleeper_players")
-        self.assertEqual([r["player_id"] for r in rows], ["1"])
-        self.assertEqual(json.loads(rows[0]["positions_json"]), ["MID"])
+        self.assertEqual(n, 3)
+        rows = {r["player_id"]: r for r in latest(self.conn, "sleeper_players")}
+        self.assertEqual(json.loads(rows["1"]["positions_json"]), ["MID"])
+        self.assertEqual((rows["1"]["active"], rows["3"]["active"]), (1, 0))
+        self.assertIsNone(rows["2"]["team"])
 
     def test_trending_failure_is_non_fatal(self):
         self.assertEqual(fetch_trending(self.conn, "s", get=fake({})), 0)

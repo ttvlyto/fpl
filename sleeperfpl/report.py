@@ -13,12 +13,12 @@ from pathlib import Path
 
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
-from .gameweek import target_gameweek, team_fixtures
+from .gameweek import season_of, target_gameweek, team_fixtures
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players
 from .models import PlayerCtx
 from .projection import project
-from .scoring_map import coverage, load_scoring_map, score_match
+from .scoring_map import coverage, league_drift, load_scoring_map, score_match
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sleeper import rostered_ids  # noqa: E402
@@ -53,9 +53,9 @@ def _flag(sp, el):
     return None
 
 
-def _history(conn, fpl_id, position, rules):
-    rows = conn.execute("SELECT stats_json FROM fpl_history WHERE fpl_id = ? AND minutes > 0 "
-                        "ORDER BY kickoff_time DESC", (fpl_id,)).fetchall()
+def _history(conn, season, fpl_id, position, rules):
+    rows = conn.execute("SELECT stats_json FROM fpl_history WHERE season = ? AND fpl_id = ? AND minutes > 0 "
+                        "ORDER BY kickoff_time DESC", (season, fpl_id)).fetchall()
     return [score_match(json.loads(r[0]), position, rules) for r in rows]
 
 
@@ -81,6 +81,8 @@ def build_report(conn, cfg, now):
     slots = starting_slots(league.get("roster_positions") or [], cfg.slot_eligibility)
     rules = load_scoring_map(cfg.scoring_map_path)
     covered, missing = coverage(rules)
+    not_in_map, changed = league_drift(rules, league.get("scoring_settings") or {})
+    missing = sorted(set(missing) | set(not_in_map))
 
     for r in rosters:
         for key in ("players_json", "starters_json", "reserve_json"):
@@ -90,7 +92,9 @@ def build_report(conn, cfg, now):
 
     teams = {t["team_id"]: t["short_name"] for t in _rows(conn, "fpl_teams")}
     fixtures = _rows(conn, "fpl_fixtures")
-    gw = target_gameweek(_rows(conn, "fpl_events"), fixtures, now)
+    events = _rows(conn, "fpl_events")
+    season = season_of(events) or "unknown"
+    gw = target_gameweek(events, fixtures, now)
     by_team = team_fixtures(fixtures, teams, gw.gw) if gw.gw else {}
 
     for p in players:
@@ -104,21 +108,25 @@ def build_report(conn, cfg, now):
     ctx = {}
     for p in players:
         sid = p["player_id"]
-        if sid not in my_ids and sid in taken:
-            continue  # on someone else's roster
-        fpl_id = match.mapping.get(sid)
-        el = el_by_id.get(fpl_id)
+        if sid not in my_ids and (sid in taken or not p["team"] or not p["active"]):
+            continue  # someone else's player, or not a usable free agent
+        el = el_by_id.get(match.mapping.get(sid))
+        fpl_id = el["fpl_id"] if el else None  # an id missing from FPL counts as unmatched
         club = teams.get(el["team_id"], p["team"]) if el else p["team"]
         pl = PlayerCtx(sleeper_id=sid, name=p["name"] or sid, positions=p["positions"], club=club,
                        fpl_id=fpl_id, on_roster=sid in my_ids, in_reserve=sid in reserve,
                        flag=_flag(p, el), fixtures=by_team.get(club, []) if el else [],
                        trending_adds=trending.get(sid))
         if el:
-            pl.history = _history(conn, fpl_id, FPL_POSITIONS.get(el["element_type"], ""), rules)
+            pl.history = _history(conn, season, fpl_id, FPL_POSITIONS.get(el["element_type"], ""), rules)
             pr = project(pl.history, [f.difficulty for f in pl.fixtures], pl.flag == "out",
                          cfg.difficulty_multipliers, cfg.avg_window)
             pl.avg, pl.n, pl.proj = pr.avg, pr.n, pr.proj
         ctx[sid] = pl
+    for sid in my_ids - set(ctx):
+        # On the roster but absent from Sleeper's player map: show it, never hide it.
+        ctx[sid] = PlayerCtx(sleeper_id=sid, name=f"Sleeper player {sid}", positions=[], club="",
+                             fpl_id=None, on_roster=True, in_reserve=sid in reserve, flag="no data")
 
     roster = [pl for pl in ctx.values() if pl.on_roster]
     free_agents = [pl for pl in ctx.values() if not pl.on_roster]
@@ -139,7 +147,7 @@ def build_report(conn, cfg, now):
             "fpl_fixtures": latest_fetched_at(conn, "fpl_fixtures"),
             "fpl_history_gw": meta_get(conn, HISTORY_META),
         },
-        "coverage": {"covered": covered, "missing": missing},
+        "coverage": {"covered": covered, "missing": missing, "changed": changed},
         "xi": {
             "total": round(lineup.total, 1),
             "starters": [{"slot": s, "player": _player_dict(pl) if pl else None} for s, pl in lineup.starters],
@@ -231,6 +239,10 @@ def render_html(report):
     if r["coverage"]["missing"]:
         parts.append(f'<div class="card banner">Approximate: {len(r["coverage"]["missing"])} scoring rule(s) have no FPL '
                      f'stat and are left out: {_e(", ".join(r["coverage"]["missing"]))}. Edit scoring_map.json to map them.</div>')
+
+    if r["coverage"].get("changed"):
+        parts.append(f'<div class="card banner">League points changed for: {_e(", ".join(r["coverage"]["changed"]))}. '
+                     f'Update those rules in scoring_map.json.</div>')
 
     rows = []
     for s in r["xi"]["starters"]:

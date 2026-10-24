@@ -1,5 +1,6 @@
 """Best legal starting XI, swap tips, and free-agent ranking."""
 
+from collections import Counter
 from dataclasses import dataclass
 
 from .config import ConfigError
@@ -134,7 +135,7 @@ def swap_tips(roster, free_agents, slots, eligibility, min_gain, max_swaps):
         rest = [pl for pl in roster if pl.sleeper_id != d.sleeper_id]
         for a in adds:
             new = best_xi(rest + [a], slots, eligibility)
-            if not set(new.empty_slots) <= set(base.empty_slots):
+            if Counter(new.empty_slots) - Counter(base.empty_slots):
                 continue
             xi_gain = new.total - base.total
             if xi_gain >= min_gain:

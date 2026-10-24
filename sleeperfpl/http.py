@@ -1,5 +1,6 @@
 """GET JSON with retries and optional throttling. Raises FetchError, never exits."""
 
+import http.client
 import json
 import time
 import urllib.error
@@ -35,11 +36,14 @@ def get_json(url, *, retries=3, timeout=120, min_interval=0.0):
             last_err = f"HTTP {e.code} from {url}"
             if e.code != 429 and e.code < 500:
                 break
-        except (urllib.error.URLError, TimeoutError) as e:
-            last_err = f"Could not reach {url}: {getattr(e, 'reason', e)}"
+        except urllib.error.URLError as e:
+            last_err = f"Could not reach {url}: {e.reason}"
         except json.JSONDecodeError as e:
             last_err = f"Bad JSON from {url}: {e}"
             break
+        except (OSError, http.client.HTTPException, ValueError) as e:
+            # Errors while reading the body: resets, truncated reads, bad encoding.
+            last_err = f"Error reading {url}: {e}"
         if attempt < retries:
             time.sleep(2 ** attempt)
     raise FetchError(last_err)

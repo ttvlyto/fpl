@@ -38,8 +38,14 @@ def load_overrides(path):
         return {"players": {}, "clubs": {}}
     except json.JSONDecodeError as e:
         raise ConfigError(f"Invalid JSON in {path}: {e}")
-    return {"players": {str(k): int(v) for k, v in (raw.get("players") or {}).items()},
-            "clubs": dict(raw.get("clubs") or {})}
+    try:
+        if not isinstance(raw, dict):
+            raise TypeError("top level must be an object")
+        return {"players": {str(k): int(v) for k, v in (raw.get("players") or {}).items()},
+                "clubs": {str(k): str(v) for k, v in (raw.get("clubs") or {}).items()}}
+    except (TypeError, ValueError, AttributeError) as e:
+        raise ConfigError(f"Bad overrides in {path}: {e} "
+                          '(expected {"players": {"<sleeper id>": <fpl id>}, "clubs": {"<code>": "<FPL code>"}})')
 
 
 def _full(e):

@@ -21,6 +21,13 @@ def parse_time(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
 
 
+def season_of(events):
+    """Season label = year of the earliest game-week deadline ("2026" for 2026/27)."""
+    deadlines = [parse_time(e.get("deadline_time")) for e in events]
+    deadlines = [d for d in deadlines if d]
+    return str(min(deadlines).year) if deadlines else None
+
+
 def _first_kickoffs(fixtures):
     out = {}
     for f in fixtures:

@@ -23,10 +23,11 @@ SNAPSHOT_TABLES = {
 }
 
 OTHER_SCHEMA = """
+-- FPL reuses player and fixture ids every season, so season is part of the key.
 CREATE TABLE IF NOT EXISTS fpl_history (
-    fpl_id INTEGER, fixture_id INTEGER, round INTEGER, kickoff_time TEXT,
+    season TEXT, fpl_id INTEGER, fixture_id INTEGER, round INTEGER, kickoff_time TEXT,
     minutes INTEGER, stats_json TEXT, fetched_at TEXT,
-    PRIMARY KEY (fpl_id, fixture_id)
+    PRIMARY KEY (season, fpl_id, fixture_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """

@@ -97,5 +97,16 @@ class FetchFplTests(unittest.TestCase):
         self.assertEqual([r[0] for r in rows], [90])
 
 
+class SeasonTests(unittest.TestCase):
+    def test_history_rows_kept_per_season(self):
+        conn = connect(":memory:")
+        fetch_bootstrap(conn, get=Recorder({"bootstrap-static/": bootstrap(9)}))
+        conn.execute("INSERT INTO fpl_history VALUES ('2025', 1, 100, 9, '2025-10-18T14:00:00Z', 45, '{}', 'x')")
+        fetch_history(conn, force=True, interval=0,
+                      get=Recorder({"element-summary/1/": {"history": [history_row(100)]}}))
+        rows = conn.execute("SELECT season, minutes FROM fpl_history ORDER BY season").fetchall()
+        self.assertEqual([tuple(r) for r in rows], [("2025", 45), ("2026", 90)])
+
+
 if __name__ == "__main__":
     unittest.main()

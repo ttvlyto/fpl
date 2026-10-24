@@ -78,5 +78,13 @@ class MatchingTests(unittest.TestCase):
                 load_overrides(bad)
 
 
+    def test_load_overrides_bad_value(self):
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "o.json"
+            bad.write_text('{"players": {"s1": "abc"}}')
+            with self.assertRaisesRegex(ConfigError, "o.json"):
+                load_overrides(bad)
+
+
 if __name__ == "__main__":
     unittest.main()

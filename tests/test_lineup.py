@@ -155,5 +155,12 @@ class SwapTests(unittest.TestCase):
         self.assertEqual([x.sleeper_id for x in ranked["DEF"]], ["D"])
 
 
+class ReviewFixLineupTests(unittest.TestCase):
+    def test_swap_never_empties_another_repeated_slot(self):
+        roster = [p("D1", "DEF", 5), p("M1", "MID", 1)]
+        tips = swap_tips(roster, [fa("X", "MID", 9), fa("Y", "MID", 8)], ["DEF", "DEF", "MID"], ELIG, 1.0, 3)
+        self.assertNotIn("D1", [t.drop.sleeper_id for t in tips])
+
+
 if __name__ == "__main__":
     unittest.main()

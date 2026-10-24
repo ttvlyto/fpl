@@ -47,7 +47,8 @@ def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
     conn.executemany("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?)",
                      [(ts, fid, f, s, w, t, et, "a", None, 900) for fid, f, s, w, t, et in elements])
     conn.executemany("INSERT INTO fpl_teams VALUES (?,?,?,?)", [(ts, 1, "ARS", "Arsenal"), (ts, 2, "CHE", "Chelsea")])
-    conn.executemany("INSERT INTO fpl_events VALUES (?,?,?,?)", [(ts, 8, None, 1), (ts, 9, None, 0)])
+    conn.executemany("INSERT INTO fpl_events VALUES (?,?,?,?)", [(ts, 1, "2026-08-15T10:00:00Z", 1), (ts, 8, "2026-10-17T10:00:00Z", 1),
+                                                                 (ts, 9, "2026-10-24T10:00:00Z", 0)])
     conn.execute("INSERT INTO fpl_fixtures VALUES (?,?,?,?,?,?,?,?,?)",
                  (ts, 50, 9, 1, 2, 4, 3, "2026-10-24T11:30:00Z", 0))
     # goals per match: Saka 1 (5+2=7), Rice 0 (2), Palmer 2 (12), Raya 0 (2), Cucurella 0 (2)
@@ -56,9 +57,9 @@ def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
     for fid, g in goals.items():
         for k in range(3):
             stats = {"goals_scored": g, "minutes": 90}
-            rows.append((fid, 100 + k, 6 + k, f"2026-10-{10 + k}T14:00:00Z", 90, json.dumps(stats), ts))
-    rows.append((2, 99, 5, "2026-10-01T14:00:00Z", 0, json.dumps({"goals_scored": 0, "minutes": 0}), ts))
-    conn.executemany("INSERT OR REPLACE INTO fpl_history VALUES (?,?,?,?,?,?,?)", rows)
+            rows.append(("2026", fid, 100 + k, 6 + k, f"2026-10-{10 + k}T14:00:00Z", 90, json.dumps(stats), ts))
+    rows.append(("2026", 2, 99, 5, "2026-10-01T14:00:00Z", 0, json.dumps({"goals_scored": 0, "minutes": 0}), ts))
+    conn.executemany("INSERT OR REPLACE INTO fpl_history VALUES (?,?,?,?,?,?,?,?)", rows)
     meta_set(conn, "history_last_gw", "8")
 
 
@@ -148,6 +149,55 @@ class ReportTests(unittest.TestCase):
         write_outputs(r, self.tmp / "site")
         self.assertEqual(json.loads((self.tmp / "site" / "report.json").read_text())["gameweek"], 9)
         self.assertIn("<html", (self.tmp / "site" / "index.html").read_text())
+
+
+class ReviewFixReportTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cfg = make_cfg(self.tmp)
+        self.conn = connect(":memory:")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_rostered_id_missing_from_players_is_listed(self):
+        seed(self.conn, roster=("s1", "s2", "s3", "s9"))
+        r = build_report(self.conn, self.cfg, NOW)
+        ids = [p["sleeper_id"] for p in r["unmatched_rostered"]]
+        self.assertIn("s9", ids)
+        self.assertEqual(next(p for p in r["unmatched_rostered"] if p["sleeper_id"] == "s9")["flag"], "no data")
+
+    def test_inactive_or_clubless_free_agent_hidden(self):
+        seed(self.conn)
+        self.conn.execute("UPDATE sleeper_players SET active = 0 WHERE player_id = 's5'")
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertNotIn("Cole Palmer", [p["name"] for p in r["free_agents"].get("MID", [])])
+
+    def test_override_to_missing_fpl_id_is_unmatched_not_dropped(self):
+        seed(self.conn)
+        self.cfg.overrides_path.write_text('{"players": {"s3": 999}}')
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertIn("s3", [p["sleeper_id"] for p in r["unmatched_rostered"]])
+        self.assertNotIn("s3", [s["drop"]["sleeper_id"] for s in r["swaps"]])
+
+    def test_previous_season_history_ignored(self):
+        seed(self.conn)
+        self.conn.execute("INSERT INTO fpl_history VALUES ('2025', 2, 100, 30, '2026-05-01T14:00:00Z', 90, ?, ?)",
+                          (json.dumps({"goals_scored": 9, "minutes": 90}), TS))
+        r = build_report(self.conn, self.cfg, NOW)
+        saka = next(s["player"] for s in r["xi"]["starters"] if s["player"]["name"] == "Bukayo Saka")
+        self.assertEqual((saka["avg"], saka["n"]), (7.0, 3))
+
+    def test_league_scoring_drift_reported(self):
+        seed(self.conn)
+        league = {"sport": "s", "roster_positions": ["GK", "MID", "MID"],
+                  "scoring_settings": {"goal": 6, "app_60": 2, "shots": 1, "tackle": 1}}
+        self.conn.execute("UPDATE sleeper_league SET data_json = ?", (json.dumps(league),))
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertIn("tackle", r["coverage"]["missing"])
+        self.assertEqual(r["coverage"]["changed"], ["goal"])
+        self.assertIn("goal", render_html(r))
 
 
 if __name__ == "__main__":

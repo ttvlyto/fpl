@@ -11,7 +11,8 @@ from .fetch_fpl import fetch_bootstrap, fetch_fixtures, fetch_history
 from .fetch_sleeper import fetch_league, fetch_players, fetch_rosters, fetch_trending
 from .http import FetchError
 from .report import BuildError, build_report, write_outputs
-from .scoring_map import coverage, ensure_scoring_map, load_scoring_map, probe_sleeper_stats
+from .scoring_map import (coverage, ensure_scoring_map, league_drift, load_scoring_map, probe_sleeper_stats,
+                          rule_lines)
 
 
 def _league(conn):
@@ -42,10 +43,19 @@ def cmd_fetch_history(cfg, conn, args):
 
 
 def cmd_coverage(cfg, conn, args):
-    covered, missing = coverage(load_scoring_map(cfg.scoring_map_path))
+    rules = load_scoring_map(cfg.scoring_map_path)
+    league = _league(conn)
+    print(f"Rules in {cfg.scoring_map_path} (check each guess):")
+    for line in rule_lines(rules):
+        print(f"  {line}")
+    covered, missing = coverage(rules)
+    not_in_map, changed = league_drift(rules, league.get("scoring_settings") or {})
     print(f"covered by FPL ({len(covered)}): {', '.join(covered) or '-'}")
     print(f"NOT covered ({len(missing)}): {', '.join(missing) or '-'}")
-    league = _league(conn)
+    if not_in_map:
+        print(f"league keys missing from the map (add them): {', '.join(not_in_map)}")
+    if changed:
+        print(f"league points differ from the map: {', '.join(changed)}")
     finished = [r["event_id"] for r in latest(conn, "fpl_events") if r["finished"]]
     week = max(finished) if finished else 1
     print("Sleeper per-match stats probe:")

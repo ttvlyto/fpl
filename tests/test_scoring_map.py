@@ -5,8 +5,8 @@ from pathlib import Path
 
 from sleeperfpl.config import ConfigError
 from sleeperfpl.http import FetchError
-from sleeperfpl.scoring_map import (ScoringRule, coverage, ensure_scoring_map, generate_scoring_map,
-                                    load_scoring_map, probe_sleeper_stats, score_match)
+from sleeperfpl.scoring_map import (ScoringRule, coverage, ensure_scoring_map, generate_scoring_map, league_drift,
+                                    load_scoring_map, probe_sleeper_stats, rule_lines, score_match)
 
 
 class ScoringMapTests(unittest.TestCase):
@@ -76,6 +76,59 @@ class ScoringMapTests(unittest.TestCase):
     def test_probe_reports_counts(self):
         lines = probe_sleeper_stats("s", "2026", 9, get=lambda url, **kw: {"a": {}, "b": {}})
         self.assertTrue(all("2 items" in line for line in lines))
+
+
+class ReviewFixScoringTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_minutes_rules_always_get_threshold(self):
+        r = generate_scoring_map({"appearance": 1, "min_60": 2, "min_played": 1})["rules"]
+        self.assertEqual((r["appearance"]["fpl_field"], r["appearance"]["min"]), ("minutes", 1))
+        self.assertEqual((r["min_60"]["fpl_field"], r["min_60"]["min"]), ("minutes", 60))
+        self.assertEqual(r["min_played"]["min"], 1)
+
+    def test_goal_lookalikes_not_goals_scored(self):
+        r = generate_scoring_map({"goals_against": -1, "shot_on_goal": 1, "error_lead_to_goal": -1,
+                                  "goalkeeper_save": 1, "pk_save": 5})["rules"]
+        self.assertEqual(r["goals_against"]["fpl_field"], "goals_conceded")
+        self.assertIsNone(r["shot_on_goal"]["fpl_field"])
+        self.assertIsNone(r["error_lead_to_goal"]["fpl_field"])
+        self.assertEqual(r["goalkeeper_save"]["fpl_field"], "saves")
+        self.assertEqual(r["pk_save"]["fpl_field"], "penalties_saved")
+
+    def test_rule_lines_show_guesses(self):
+        lines = rule_lines([ScoringRule("goal", "goals_scored", 5), ScoringRule("shots", None, 1)])
+        self.assertEqual(lines, ["goal -> goals_scored (5)", "shots -> (no FPL stat) (1)"])
+
+    def write(self, data):
+        path = self.dir / "scoring_map.json"
+        path.write_text(json.dumps(data))
+        return path
+
+    def test_bad_shapes_raise_config_error(self):
+        cases = [([1, 2], "scoring_map.json"),
+                 ({"rules": {"goals": 6}}, "'goals'"),
+                 ({"rules": {"app": {"fpl_field": "minutes", "points": 1, "min": "abc"}}}, "'app'"),
+                 ({"rules": {"g": {"fpl_field": "goals_scored", "points": 1, "positions": "DEF"}}}, "'g'")]
+        for data, needle in cases:
+            with self.subTest(data=data):
+                with self.assertRaisesRegex(ConfigError, needle):
+                    load_scoring_map(self.write(data))
+
+    def test_numeric_strings_converted(self):
+        rules = load_scoring_map(self.write({"rules": {"app": {"fpl_field": "minutes", "points": "2", "min": "60"}}}))
+        self.assertEqual(score_match({"minutes": 90}, "MID", rules), 2)
+
+    def test_league_drift(self):
+        rules = [ScoringRule("goal", "goals_scored", 5), ScoringRule("assist", "assists", 3)]
+        not_in_map, changed = league_drift(rules, {"goal": 6, "assist": 3, "shots": 1})
+        self.assertEqual(not_in_map, ["shots"])
+        self.assertEqual(changed, ["goal"])
 
 
 if __name__ == "__main__":

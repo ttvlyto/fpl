@@ -4,6 +4,7 @@ import json
 import sys
 
 from .db import latest, meta_get, meta_set, now_iso
+from .gameweek import season_of
 from .http import FetchError, get_json
 
 FPL = "https://fantasy.premierleague.com/api"
@@ -65,6 +66,7 @@ def fetch_history(conn, *, force=False, interval=0.5, get=get_json):
         if last_finished is None or (done is not None and last_finished <= int(done)):
             return 0
 
+    season = season_of([dict(r) for r in latest(conn, "fpl_events")]) or "unknown"
     ids = [r["fpl_id"] for r in latest(conn, "fpl_elements") if (r["total_minutes"] or 0) > 0]
     fetched, failed = 0, 0
     for fpl_id in ids:
@@ -77,8 +79,8 @@ def fetch_history(conn, *, force=False, interval=0.5, get=get_json):
         ts = now_iso()
         with conn:
             conn.executemany(
-                "INSERT OR REPLACE INTO fpl_history VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [(fpl_id, h["fixture"], h.get("round"), h.get("kickoff_time"),
+                "INSERT OR REPLACE INTO fpl_history VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(season, fpl_id, h["fixture"], h.get("round"), h.get("kickoff_time"),
                   h.get("minutes") or 0, json.dumps(h), ts)
                  for h in data.get("history", [])],
             )
@@ -86,4 +88,5 @@ def fetch_history(conn, *, force=False, interval=0.5, get=get_json):
 
     if failed == 0 and last_finished is not None:
         meta_set(conn, HISTORY_META, str(last_finished))
+        meta_set(conn, "history_season", season)
     return fetched

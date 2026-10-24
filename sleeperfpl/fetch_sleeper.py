@@ -31,16 +31,14 @@ def fetch_league(conn, league_id, get=get_json):
 
 
 def fetch_players(conn, sport, get=get_json):
-    """Snapshot active players who have a club; return how many were stored."""
+    """Snapshot every player (rostered ones can be inactive or clubless); return the count."""
     players = get(f"{API}/players/{sport}") or {}
     ts = now_iso()
     rows = []
     for pid, p in players.items():
-        if not p.get("active") or not p.get("team"):
-            continue
         fp = p.get("fantasy_positions") or ([p["position"]] if p.get("position") else [])
-        rows.append((ts, pid, player_name(p), p["team"], json.dumps(fp),
-                     p.get("status"), p.get("injury_status"), 1))
+        rows.append((ts, pid, player_name(p), p.get("team"), json.dumps(fp),
+                     p.get("status"), p.get("injury_status"), int(bool(p.get("active", True)))))
     with conn:
         conn.executemany("INSERT INTO sleeper_players VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
     return len(rows)

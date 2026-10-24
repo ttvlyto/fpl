@@ -77,12 +77,12 @@ Valid fields are listed by `coverage` errors and in `sleeperfpl/scoring_map.py`.
 ## Running on the server
 
 1. Copy the repo to `/opt/sleeper_fpl`, plus your `config.json`.
-2. Run the setup commands above once.
+2. `mkdir -p /opt/sleeper_fpl/data`, then run the setup commands above once.
 3. `crontab -e` and paste `deploy/crontab.example`.
 4. Install `deploy/sleeperfpl-web.service` to serve the page at
    `http://<server>:8080/`. Keep that port closed on your router.
 
-Logs go to `data/cron.log`. The database is `data/fpl.db`. It keeps every
+Logs go to `data/cron.log`. At the start of each new season, check `overrides.json`, because FPL renumbers its player ids. The database is `data/fpl.db`. It keeps every
 snapshot, which is the history a future prediction model would need.
 
 ## The original script
