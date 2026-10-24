@@ -356,9 +356,9 @@ class LiveReportTests(unittest.TestCase):
         self.conn.execute("UPDATE sleeper_league SET data_json = ?", (json.dumps(league),))
         self.conn.execute("UPDATE sleeper_rosters SET starters_json = ? WHERE owner_id = 'u1'",
                           (json.dumps(["s1", "s2", "s3"]),))
-        for pid, minutes in (("s1", 90), ("s2", 0), ("s3", 90)):
-            self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, ?, ?, ?)",
-                              (pid, json.dumps({"min": minutes}), TS))
+        for pid, minutes in (("s1", 90), ("s2", 0), ("s3", 90)):   # fetched after the 11:30 match ended
+            self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, ?, ?, '2026-10-24T14:30:00Z')",
+                              (pid, json.dumps({"min": minutes})))
         self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 7, 's2', ?, ?)", (json.dumps({"min": 90}), TS))
 
     def tearDown(self):
@@ -375,6 +375,16 @@ class LiveReportTests(unittest.TestCase):
         self.assertIsNone(live["replacements"][0]["bench"])
         page = render_html(r)
         self.assertIn("This week (live)", page)
+
+    def test_no_replacement_without_stats_fetched_after_the_match(self):
+        self.conn.execute("DELETE FROM sleeper_stats WHERE week = 9")
+        after = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
+        self.assertEqual(build_report(self.conn, self.cfg, after)["live"]["replacements"], [])
+
+    def test_stats_fetched_before_match_end_dont_count(self):
+        self.conn.execute("UPDATE sleeper_stats SET fetched_at = '2026-10-24T12:00:00Z' WHERE week = 9")
+        after = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
+        self.assertEqual(build_report(self.conn, self.cfg, after)["live"]["replacements"], [])
 
 
 if __name__ == "__main__":

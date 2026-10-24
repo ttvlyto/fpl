@@ -295,6 +295,10 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
     gw = live_gameweek(events, fixtures, now)
     if gw is None:
         return None
+    # Minutes are only known once Sleeper's stats for this week were fetched after the match ended;
+    # a player missing from earlier stats is "unknown", never "0 minutes".
+    stats_at = parse_time(conn.execute("SELECT MAX(fetched_at) FROM sleeper_stats WHERE season = ? AND week = ?",
+                                       (sleeper_season, gw)).fetchone()[0])
     started, finished_any, in_progress = set(), set(), set()
     live_fx = [f for f in fixtures if f.get("event") == gw]
     for f in live_fx:
@@ -304,7 +308,10 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
                 continue
             started.add(code)
             if f.get("finished") or k + MATCH_LENGTH <= now:
-                finished_any.add(code)
+                if stats_at and stats_at >= k + MATCH_LENGTH:
+                    finished_any.add(code)
+                else:
+                    in_progress.add(code)   # over, but its minutes aren't in yet
             else:
                 in_progress.add(code)
     finished = finished_any - in_progress
