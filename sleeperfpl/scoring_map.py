@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from .config import ConfigError
 from .http import FetchError, get_json
 
-FPL_FIELDS = ["minutes", "goals_scored", "assists", "clean_sheets", "goals_conceded", "own_goals",
+FPL_FIELDS = ["minutes", "starts", "goals_scored", "assists", "clean_sheets", "goals_conceded", "own_goals",
               "penalties_saved", "penalties_missed", "yellow_cards", "red_cards", "saves", "bonus",
               "bps", "tackles", "recoveries", "clearances_blocks_interceptions", "defensive_contribution"]
 

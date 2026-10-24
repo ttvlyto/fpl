@@ -1,0 +1,92 @@
+"""python3 -m sleeperfpl [--config PATH] <command>"""
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+
+from .config import ConfigError, load_config
+from .db import connect, latest
+from .fetch_fpl import fetch_bootstrap, fetch_fixtures, fetch_history
+from .fetch_sleeper import fetch_league, fetch_players, fetch_rosters, fetch_trending
+from .http import FetchError
+from .report import BuildError, build_report, write_outputs
+from .scoring_map import coverage, ensure_scoring_map, load_scoring_map, probe_sleeper_stats
+
+
+def _league(conn):
+    rows = latest(conn, "sleeper_league")
+    if not rows:
+        raise BuildError("no league data yet; run fetch-daily first")
+    return json.loads(rows[0]["data_json"])
+
+
+def cmd_fetch_daily(cfg, conn, args):
+    sport = fetch_league(conn, cfg.league_id)
+    print(f"league: sport={sport}")
+    print(f"sleeper players: {fetch_players(conn, sport)}")
+    print(f"fpl players: {fetch_bootstrap(conn)}")
+    print(f"fpl fixtures: {fetch_fixtures(conn)}")
+    if ensure_scoring_map(cfg.scoring_map_path, _league(conn).get("scoring_settings") or {}):
+        print(f"created {cfg.scoring_map_path}; review it, then run `coverage`")
+
+
+def cmd_fetch_rosters(cfg, conn, args):
+    print(f"rosters: {fetch_rosters(conn, cfg.league_id)}")
+    print(f"trending: {fetch_trending(conn, _league(conn)['sport'])}")
+
+
+def cmd_fetch_history(cfg, conn, args):
+    n = fetch_history(conn, force=args.force, interval=cfg.fpl_request_interval)
+    print(f"fpl history: {n} players fetched" if n else "fpl history: up to date (use --force to refetch)")
+
+
+def cmd_coverage(cfg, conn, args):
+    covered, missing = coverage(load_scoring_map(cfg.scoring_map_path))
+    print(f"covered by FPL ({len(covered)}): {', '.join(covered) or '-'}")
+    print(f"NOT covered ({len(missing)}): {', '.join(missing) or '-'}")
+    league = _league(conn)
+    finished = [r["event_id"] for r in latest(conn, "fpl_events") if r["finished"]]
+    week = max(finished) if finished else 1
+    print("Sleeper per-match stats probe:")
+    for line in probe_sleeper_stats(league["sport"], str(league.get("season", "")), week):
+        print(f"  {line}")
+
+
+def cmd_build(cfg, conn, args):
+    report = build_report(conn, cfg, datetime.now(timezone.utc))
+    write_outputs(report, cfg.output_dir)
+    print(f"wrote {cfg.output_dir / 'index.html'} (GW{report['gameweek']}, {len(report['swaps'])} swap tips)")
+
+
+COMMANDS = {
+    "fetch-daily": (cmd_fetch_daily, "league, players, FPL bootstrap + fixtures"),
+    "fetch-rosters": (cmd_fetch_rosters, "rosters + trending adds"),
+    "fetch-history": (cmd_fetch_history, "FPL match history (only after a game week finishes)"),
+    "coverage": (cmd_coverage, "how much of the league's scoring FPL covers"),
+    "build": (cmd_build, "write report.json and index.html"),
+}
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="sleeperfpl", description="Sleeper EPL rankings")
+    ap.add_argument("--config", help="path to config.json (default: $SLEEPER_FPL_CONFIG or ./config.json)")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name, (_, help_text) in COMMANDS.items():
+        p = sub.add_parser(name, help=help_text)
+        if name == "fetch-history":
+            p.add_argument("--force", action="store_true", help="refetch even if no new game week finished")
+    args = ap.parse_args(argv)
+
+    try:
+        cfg = load_config(args.config)
+        conn = connect(cfg.db_path)
+        COMMANDS[args.cmd][0](cfg, conn, args)
+    except (ConfigError, BuildError, FetchError) as e:
+        sys.stderr.write(f"error: {e}\n")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
