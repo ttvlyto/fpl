@@ -418,6 +418,7 @@ class ReviewFixLiveReportTests(LiveReportTests):
         boom = mock.Mock(side_effect=RuntimeError("down"))
         with mock.patch.object(cli, "fetch_rosters", boom), mock.patch.object(cli, "fetch_fixtures", boom), \
              mock.patch.object(cli, "fetch_kalshi", boom), mock.patch.object(cli, "fetch_polymarket", boom), \
+             mock.patch.object(cli, "fetch_sleeper_stats", boom), \
              mock.patch.object(cli, "matchday_due", return_value=True), \
              mock.patch.object(cli, "cmd_build", lambda *a: built.append(1)):
             cli.cmd_matchday(self.cfg, self.conn, mock.Mock(force=False))
