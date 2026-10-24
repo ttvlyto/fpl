@@ -5,7 +5,7 @@ game week is under way, pickups go through waivers and we plan the next one.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .models import Fixture
 
@@ -63,6 +63,23 @@ def live_gameweek(events, fixtures, now):
     live = [e["event_id"] for e in events
             if not e["finished"] and kickoffs.get(e["event_id"]) and kickoffs[e["event_id"]] <= now]
     return max(live) if live else None
+
+
+MATCH_LENGTH = timedelta(hours=2.5)
+
+
+def matchday_due(fixtures, now, window_hours):
+    """True when a match kicks off within `window_hours`, or ended within the last 2.5 h
+    (so its 0-minute starters can be checked)."""
+    for f in fixtures:
+        k = parse_time(f.get("kickoff_time"))
+        if not k:
+            continue
+        if now < k <= now + timedelta(hours=window_hours):
+            return True
+        if k + MATCH_LENGTH <= now <= k + 2 * MATCH_LENGTH:
+            return True
+    return False
 
 
 def team_fixtures(fixtures, teams, gw):

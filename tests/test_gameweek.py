@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from sleeperfpl.gameweek import live_gameweek, season_of, target_gameweek, team_fixtures
+from sleeperfpl.gameweek import live_gameweek, matchday_due, season_of, target_gameweek, team_fixtures
 
 
 def ev(i, finished):
@@ -60,6 +60,16 @@ class LiveGameweekTests(unittest.TestCase):
     def test_live_gameweek(self):
         self.assertIsNone(live_gameweek(EVENTS, FIXTURES, utc(2026, 10, 22, 20)))
         self.assertEqual(live_gameweek(EVENTS, FIXTURES, utc(2026, 10, 24, 12)), 9)
+
+
+class MatchdayDueTests(unittest.TestCase):
+    def test_due_before_kickoff_and_after_final_whistle(self):
+        fx = [fx_ for fx_ in FIXTURES if fx_["fixture_id"] == 1]   # kickoff 2026-10-24 11:30
+        self.assertFalse(matchday_due(fx, utc(2026, 10, 24, 7), 3))
+        self.assertTrue(matchday_due(fx, utc(2026, 10, 24, 9), 3))
+        self.assertFalse(matchday_due(fx, utc(2026, 10, 24, 13), 3))   # mid-match: nothing to do
+        self.assertTrue(matchday_due(fx, utc(2026, 10, 24, 14, 30), 3))  # just finished: check minutes
+        self.assertFalse(matchday_due(fx, utc(2026, 10, 24, 18), 3))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,12 @@ Fantasy Premier League site, then builds one web page with:
 - your **best starting XI** (only lineups your league's rules allow),
 - **swap tips** ("Drop X, add Y: +1.9 projected"), labelled as waiver
   claims once the match week has started,
-- the **top free agents** per position, with Sleeper trending adds.
+- the **top free agents** per position, with Sleeper trending adds,
+- a **Matches** table from free Kalshi and Polymarket betting odds: win/draw/win
+  chances, each team's expected goals and clean-sheet chance,
+- a **This week (live)** section on match days: starters who may not play, and
+  bench swaps for starters who got 0 minutes (each player locks at his own kickoff),
+- a **Report card**: how far off the projections were each week, so changes can be judged.
 
 Points are **your league's exact scoring**, calculated from Sleeper's own
 weekly stats. If those aren't available (or you set `"stats_source": "fpl"`),
@@ -33,10 +38,25 @@ python3 -m sleeperfpl fetch-daily            # also creates scoring_map.json the
 python3 -m sleeperfpl fetch-rosters
 python3 -m sleeperfpl fetch-history --force  # first time only; takes a few minutes
 python3 -m sleeperfpl coverage               # which scoring rules FPL can't see
+python3 -m sleeperfpl fetch-markets          # betting odds (Kalshi + Polymarket, free, no key)
 python3 -m sleeperfpl build                  # writes site/index.html and site/report.json
 ```
 
 Open `site/index.html` in a browser.
+
+## How projections work
+
+- **With betting odds** (tagged `mkt` on the page): clean-sheet and goals-against points use
+  the market's clean-sheet chance and expected goals against (clean sheets scaled by how
+  often the player plays 60+ minutes); attacking points (goals, assists, shots on target,
+  key passes, crosses, dribbles, penalties won) scale with his team's expected goals; the
+  rest (tackles, saves, cards…) is his recent average.
+- **Without usable odds** for a match: recent average × FPL difficulty (hover a projection
+  to see this number for comparison).
+- ⚑ marks players where history and the market disagree: a clean-sheet record far from
+  the market's clean-sheet chance, or (on match days) market goal odds far from how often
+  he has scored.
+- Odds older than `market_stale_hours`, or from thin markets, are shown as stale or ignored.
 
 ## Things you can edit
 
@@ -51,6 +71,12 @@ Open `site/index.html` in a browser.
 | `free_agents_per_position` | 10 | free agents listed per position |
 | `stats_source` | `"sleeper"` | `"sleeper"` = exact league points from Sleeper's stats; `"fpl"` = approximate, via `scoring_map.json` |
 | `undroppable` | `[]` | players never suggested as drops, by name or Sleeper id, e.g. `["Bukayo Saka"]`. Shown with a 🔒 |
+| `market_max_spread` | 0.10 | ignore odds whose buy/sell gap is wider than this |
+| `market_min_depth` | Kalshi 50, Polymarket 1000 | ignore thinner markets (contracts / USD) |
+| `market_stale_hours` | 24 | older odds are marked stale and not used |
+| `matchday_window_hours` | 3 | how soon before kickoff a match-day run refreshes |
+| `league_avg_goals` | 1.35 | expected-goals baseline when a team has no market history |
+| `flag_cs_gap`, `flag_goal_gap` | 0.25, 0.20 | how big a history-vs-market gap gets a ⚑ |
 | `slot_eligibility` | GK/DEF/MID/FWD | which positions can fill each lineup slot. If `build` names an unknown slot (a flex slot, say), add it here, e.g. `"FLEX": ["DEF", "MID", "FWD"]` |
 
 **`scoring_map.json`**: how FPL stats turn into your league's points.
@@ -75,7 +101,8 @@ Valid fields are listed by `coverage` errors and in `sleeperfpl/scoring_map.py`.
 **`overrides.json`** (optional): fix players or clubs that don't match.
 
 ```json
-{"players": {"<sleeper_player_id>": <fpl_id>}, "clubs": {"<sleeper club code>": "<FPL short name>"}}
+{"players": {"<sleeper_player_id>": <fpl_id>}, "clubs": {"<sleeper club code>": "<FPL short name>"},
+ "market_teams": {"kalshi:<code>": "<FPL short name>", "polymarket:<code>": "<FPL short name>"}}
 ```
 
 ## Running on the server

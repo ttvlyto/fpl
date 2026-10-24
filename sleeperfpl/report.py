@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
-from .gameweek import live_gameweek, season_of, target_gameweek, team_fixtures
+from .gameweek import MATCH_LENGTH, live_gameweek, season_of, target_gameweek, team_fixtures
 from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
@@ -293,9 +293,6 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
     pl.p_goal_market = goal_quotes.get((normalize_name(pl.name), pl.club))
     if pl.p_goal_market is not None and abs(pl.p_goal_market - pl.p_goal_hist) >= cfg.flag_goal_gap:
         pl.market_flags.append("goal")
-
-
-MATCH_LENGTH = timedelta(hours=2.5)
 
 
 def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,

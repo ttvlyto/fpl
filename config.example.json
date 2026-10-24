@@ -60,5 +60,15 @@
   },
   "fpl_request_interval": 0.5,
   "stats_source": "sleeper",
-  "undroppable": []
+  "undroppable": [],
+  "market_max_spread": 0.1,
+  "market_min_depth": {
+    "kalshi": 50,
+    "polymarket": 1000
+  },
+  "market_stale_hours": 24,
+  "matchday_window_hours": 3,
+  "league_avg_goals": 1.35,
+  "flag_cs_gap": 0.25,
+  "flag_goal_gap": 0.2
 }

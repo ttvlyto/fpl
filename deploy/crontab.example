@@ -15,3 +15,10 @@
 
 # Thursdays, hourly from noon: rosters + trending before lineups are set
 0 12-23 * * 4 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-rosters ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+
+# Every 2 hours: Kalshi + Polymarket match odds
+15 */2 * * *  cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-markets; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+
+# Match days (Fri-Mon), every 30 minutes: does nothing unless a match kicks off within
+# matchday_window_hours or just finished; then refreshes lineups, odds, player markets, live stats
+*/30 * * * 5,6,0,1 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock python3 -m sleeperfpl matchday >> data/cron.log 2>&1
