@@ -2,7 +2,7 @@
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_PATH = "config.json"
@@ -62,7 +62,7 @@ class Config:
     stats_source: str = "sleeper"
     undroppable: list = None
     market_max_spread: float = 0.10
-    market_min_depth: dict = None
+    market_min_depth: dict = field(default_factory=lambda: dict(DEFAULTS["market_min_depth"]))
     market_stale_hours: float = 24
     matchday_window_hours: float = 3
     league_avg_goals: float = 1.35

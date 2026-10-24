@@ -67,6 +67,16 @@ def poisson_probs(lam_home, lam_away):
     }
 
 
+_GRID_PROBS = []
+
+
+def _grid_probs():
+    """Model probabilities for every grid point, computed once per process."""
+    if not _GRID_PROBS:
+        _GRID_PROBS.extend((lh, la, poisson_probs(lh, la)) for lh in GRID for la in GRID)
+    return _GRID_PROBS
+
+
 def _targets(quotes, home, away):
     """(kind, line, market probability) per quote; 1x2 mids normalised per source."""
     out = []
@@ -97,12 +107,10 @@ def fit_fixture(quotes, home, away):
     if not targets:
         return None
     best = None
-    for lh in GRID:
-        for la in GRID:
-            pr = poisson_probs(lh, la)
-            err = sum((((pr[k][line] if line is not None else pr[k]) - p) ** 2) for k, line, p in targets)
-            if best is None or err < best[0]:
-                best = (err, lh, la, pr)
+    for lh, la, pr in _grid_probs():
+        err = sum((((pr[k][line] if line is not None else pr[k]) - p) ** 2) for k, line, p in targets)
+        if best is None or err < best[0]:
+            best = (err, lh, la, pr)
     _, lh, la, pr = best
     return FixtureOdds(home, away, lh, la, pr["home"], pr["draw"], pr["away"],
                        cs_home=math.exp(-la), cs_away=math.exp(-lh),

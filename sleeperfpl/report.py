@@ -8,18 +8,23 @@ import html
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
 from .gameweek import season_of, target_gameweek, team_fixtures
+from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
+from .markets import latest_quotes, mid, team_code, usable
 from .models import PlayerCtx
+from .pricing import fixture_odds
 from .projection import project
+from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
-from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_history
+from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points, sleeper_weeks
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sleeper import rostered_ids  # noqa: E402
@@ -54,9 +59,10 @@ def _flag(sp, el):
     return None
 
 
-def _history(conn, season, fpl_id, position, rules):
+def _history(conn, season, fpl_id, position, rules, max_round=None):
     rows = conn.execute("SELECT stats_json FROM fpl_history WHERE season = ? AND fpl_id = ? AND minutes > 0 "
-                        "ORDER BY kickoff_time DESC", (season, fpl_id)).fetchall()
+                        "AND (? IS NULL OR round <= ?) ORDER BY kickoff_time DESC",
+                        (season, fpl_id, max_round, max_round)).fetchall()
     return [score_match(json.loads(r[0]), position, rules) for r in rows]
 
 
@@ -65,9 +71,40 @@ def _player_dict(pl):
         "sleeper_id": pl.sleeper_id, "name": pl.name, "positions": pl.positions, "club": pl.club,
         "flag": pl.flag, "avg": None if pl.avg is None else round(pl.avg, 1), "n": pl.n,
         "proj": round(pl.proj, 1), "trending_adds": pl.trending_adds, "undroppable": pl.undroppable,
+        "proj_v1": round(pl.proj_v1, 1), "proj_source": pl.proj_source, "market_flags": pl.market_flags,
+        "p_goal_market": None if pl.p_goal_market is None else round(pl.p_goal_market, 2),
+        "p_goal_hist": None if pl.p_goal_hist is None else round(pl.p_goal_hist, 2),
         "fixtures": [{"opponent": f.opponent, "home": f.home, "difficulty": f.difficulty, "kickoff": f.kickoff}
                      for f in pl.fixtures],
     }
+
+
+def _share(weeks, test):
+    return sum(1 for w in weeks if test(w)) / len(weeks) if weeks else None
+
+
+def _goal_quotes(conn, cfg, now, codes, overrides):
+    """{(normalized player name, FPL team code): P(1+ goals)} from fresh, usable quotes."""
+    cutoff = now - timedelta(hours=cfg.market_stale_hours)
+    out = {}
+    for q in sorted(latest_quotes(conn, "player_quotes"), key=lambda q: q["fetched_at"]):
+        fetched = parse_time(q["fetched_at"])
+        if q["market"] != "goal1" or not fetched or fetched < cutoff or not usable(q, cfg):
+            continue
+        team = team_code(q["source"], q["team"], codes, overrides)
+        if team:
+            out[(normalize_name(q["player"]), team)] = mid(q)
+    return out
+
+
+def _match_entry(f, teams, odds, stale):
+    base = {"fixture_id": f["fixture_id"], "home": teams.get(f["team_h"]), "away": teams.get(f["team_a"]),
+            "kickoff": f.get("kickoff_time")}
+    if odds is None:
+        return {**base, "market": None}
+    return {**base, "market": "ok", "stale": stale, "sources": odds.sources, "fetched_at": odds.fetched_at,
+            **{k: round(getattr(odds, k), 2) for k in ("p_home", "p_draw", "p_away", "lam_home", "lam_away",
+                                                        "cs_home", "cs_away")}}
 
 
 def build_report(conn, cfg, now):
@@ -104,11 +141,30 @@ def build_report(conn, cfg, now):
     season = season_of(events) or "unknown"
     gw = target_gameweek(events, fixtures, now)
     by_team = team_fixtures(fixtures, teams, gw.gw) if gw.gw else {}
+    finished = [e["event_id"] for e in events if e["finished"]]
+    last_finished = max(finished) if finished else None
+    overrides = load_overrides(cfg.overrides_path)
+    codes = set(teams.values())
+
+    # Betting markets: fresh odds drive projections; stale ones are only displayed.
+    quotes = latest_quotes(conn, "market_quotes")
+    fodds, markets_unmatched = fixture_odds(quotes, fixtures, teams, cfg, now, overrides)
+    all_odds = {}
+    if any(f["fixture_id"] not in fodds for f in fixtures if gw.gw and f.get("event") == gw.gw):
+        # Only needed to show stale prices for fixtures without fresh ones.
+        any_age = SimpleNamespace(**{**vars(cfg), "market_stale_hours": 24 * 365 * 50})
+        all_odds, _ = fixture_odds(quotes, fixtures, teams, any_age, now, overrides)
+    team_lams = {}
+    for o in fodds.values():
+        team_lams.setdefault(o.home, []).append(o.lam_home)
+        team_lams.setdefault(o.away, []).append(o.lam_away)
+    baseline = {t: sum(v) / len(v) for t, v in team_lams.items()}
+    goal_quotes = _goal_quotes(conn, cfg, now, codes, overrides)
 
     for p in players:
         p["positions"] = json.loads(p["positions_json"] or "[]")
     match = match_players(players, elements, [{"team_id": k, "short_name": v} for k, v in teams.items()],
-                          load_overrides(cfg.overrides_path))
+                          overrides)
     el_by_id = {e["fpl_id"]: e for e in elements}
     trending = {t["player_id"]: t["count"] for t in _rows(conn, "sleeper_trending")}
 
@@ -126,13 +182,18 @@ def build_report(conn, cfg, now):
                        flag=_flag(p, el), fixtures=by_team.get(club, []) if el else [],
                        trending_adds=trending.get(sid))
         if el:
+            pos = FPL_POSITIONS.get(el["element_type"], "")
+            weeks = sleeper_weeks(conn, sleeper_season, sid, last_finished) if use_sleeper else []
             if use_sleeper:
-                pl.history = sleeper_history(conn, sleeper_season, sid, scoring)
+                pl.history = [sleeper_points(w, scoring) for w in weeks]
             else:
-                pl.history = _history(conn, season, fpl_id, FPL_POSITIONS.get(el["element_type"], ""), rules)
+                pl.history = _history(conn, season, fpl_id, pos, rules, last_finished)
             pr = project(pl.history, [f.difficulty for f in pl.fixtures], pl.flag == "out",
                          cfg.difficulty_multipliers, cfg.avg_window)
             pl.avg, pl.n, pl.proj = pr.avg, pr.n, pr.proj
+            pl.proj_v1 = pr.proj
+            if use_sleeper:
+                _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg)
         ctx[sid] = pl
     for sid in my_ids - set(ctx):
         # On the roster but absent from Sleeper's player map: show it, never hide it.
@@ -152,8 +213,17 @@ def build_report(conn, cfg, now):
     swaps = swap_tips(roster, free_agents, slots, cfg.slot_eligibility, cfg.swap_min_gain, cfg.max_swaps)
     ranked = rank_free_agents(free_agents, cfg.free_agents_per_position)
 
+    target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
+    matches = [_match_entry(f, teams, fodds.get(f["fixture_id"]) or all_odds.get(f["fixture_id"]),
+                            f["fixture_id"] not in fodds) for f in target]
+    priced = sum(1 for f in target if f["fixture_id"] in fodds)
+    note = "difficulty" if not use_sleeper or priced == 0 else "market" if priced == len(target) else "mixed"
+
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "matches": matches,
+        "markets_unmatched": markets_unmatched,
+        "projection_note": note,
         "gameweek": gw.gw,
         "mode": gw.mode,
         "first_kickoff": gw.first_kickoff.strftime("%Y-%m-%dT%H:%M:%SZ") if gw.first_kickoff else None,
@@ -181,6 +251,36 @@ def build_report(conn, cfg, now):
         "unmatched_rostered": [_player_dict(pl) for pl in roster if pl.fpl_id is None],
         "unmatched_count": len(match.unmatched),
     }
+
+
+def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
+    """Re-price the projection with betting odds and flag history/market disagreements."""
+    if not weeks:
+        return
+    inp = v2_inputs(weeks, scoring, SLEEPER_PREFIX.get(pos, ""), cfg.avg_window)
+    if pl.flag != "out" and pl.fixtures and inp:
+        parts, used = [], False
+        for f in pl.fixtures:
+            o = fodds.get(f.fixture_id)
+            if o:
+                own, opp = (o.lam_home, o.lam_away) if f.home else (o.lam_away, o.lam_home)
+                parts.append(project_v2(inp, own, opp, baseline.get(pl.club, cfg.league_avg_goals)))
+                used = True
+            else:  # no usable market for this fixture: v1 for it
+                parts.append((pl.avg or 0.0) * cfg.difficulty_multipliers[f.difficulty])
+        if used:
+            pl.proj, pl.proj_source = sum(parts), "market"
+
+    first = fodds.get(pl.fixtures[0].fixture_id) if pl.fixtures else None
+    if pos in ("GK", "DEF") and first:
+        hist_cs = _share(weeks, lambda w: (w.get("cs") or 0) >= 1)
+        mkt_cs = first.cs_home if pl.fixtures[0].home else first.cs_away
+        if abs(hist_cs - mkt_cs) >= cfg.flag_cs_gap:
+            pl.market_flags.append("cs")
+    pl.p_goal_hist = _share(weeks, lambda w: (w.get("g") or 0) >= 1)
+    pl.p_goal_market = goal_quotes.get((normalize_name(pl.name), pl.club))
+    if pl.p_goal_market is not None and abs(pl.p_goal_market - pl.p_goal_hist) >= cfg.flag_goal_gap:
+        pl.market_flags.append("goal")
 
 
 # ---------------------------------------------------------------- html
@@ -235,11 +335,52 @@ def _player_cells(p):
     flag = f' <span class="flag">{_e(p["flag"])}</span>' if p["flag"] else ""
     if p.get("undroppable"):
         flag += ' <span title="undroppable">🔒</span>'
+    if p.get("market_flags"):
+        why = "; ".join(_FLAG_TEXT[f](p) for f in p["market_flags"])
+        flag += f' <span class="flag" title="{_e(why)}">⚑ {_e(why)}</span>'
     pos = "/".join(p["positions"])
+    mkt = ' <small title="projection uses betting-market odds">mkt</small>' if p.get("proj_source") == "market" else ""
     return (f'<td>{_e(p["name"])} <small>{_e(pos)} {_e(p["club"])}</small>{flag}</td>'
             f'<td>{_fixtures_html(p)}</td>'
             f'<td class="num" data-v="{p["avg"] if p["avg"] is not None else -1}">{_num(p["avg"])} <small>({p["n"]})</small></td>'
-            f'<td class="num" data-v="{p["proj"]}"><b>{_num(p["proj"])}</b></td>')
+            f'<td class="num" data-v="{p["proj"]}" title="difficulty-only projection: {_num(p.get("proj_v1"))}">'
+            f'<b>{_num(p["proj"])}</b>{mkt}</td>')
+
+
+def _pct(x):
+    return "–" if x is None else f"{round(100 * x)}%"
+
+
+_FLAG_TEXT = {
+    "cs": lambda p: "clean-sheet history and market disagree",
+    "goal": lambda p: f"market {_pct(p.get('p_goal_market'))} to score vs {_pct(p.get('p_goal_hist'))} historically",
+}
+
+
+def _matches_card(r):
+    rows = []
+    for m in r.get("matches", []):
+        teams = f"{_e(m['home'])} v {_e(m['away'])}"
+        when = _e((m.get("kickoff") or "")[:16].replace("T", " "))
+        if m.get("market") is None:
+            rows.append(f'<tr><td>{teams}</td><td colspan="4" class="muted">no market — using FPL difficulty</td>'
+                        f'<td>{when}</td></tr>')
+            continue
+        age = " · <span class=\"flag\">stale</span>" if m["stale"] else ""
+        rows.append(f'<tr><td>{teams}</td><td class="num">{_pct(m["p_home"])}/{_pct(m["p_draw"])}/{_pct(m["p_away"])}</td>'
+                    f'<td class="num">{m["lam_home"]:.2f}–{m["lam_away"]:.2f}</td>'
+                    f'<td class="num">{_pct(m["cs_home"])}/{_pct(m["cs_away"])}</td>'
+                    f'<td><small>{_e("+".join(m["sources"]))} {_e(m["fetched_at"][5:16].replace("T", " "))}</small>{age}</td>'
+                    f'<td>{when}</td></tr>')
+    if not rows:
+        return ""
+    note = {"market": "Projections use betting-market odds.",
+            "mixed": "Projections use betting odds where a market exists, FPL difficulty elsewhere.",
+            "difficulty": "No usable betting odds: projections use FPL difficulty."}.get(r.get("projection_note"), "")
+    head = ('<tr><th>Match</th><th class="num">Win/Draw/Win</th><th class="num">Exp. goals</th>'
+            '<th class="num">Clean sheet</th><th>Source</th><th>Kickoff (UTC)</th></tr>')
+    return (f'<div class="card"><h2>Matches</h2><div class="scroll"><table><thead>{head}</thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div><div class="muted" style="margin-top:6px">{_e(note)}</div></div>')
 
 
 HEAD = '<tr><th>Player</th><th>vs</th><th class="num">Avg5</th><th class="num">Proj</th>'
@@ -268,6 +409,7 @@ def render_html(report):
         parts.append(f'<div class="card banner">Approximate: {len(r["coverage"]["missing"])} scoring rule(s) have no FPL '
                      f'stat and are left out: {_e(", ".join(r["coverage"]["missing"]))}. Edit scoring_map.json to map them.</div>')
 
+    parts.append(_matches_card(r))
     if r["coverage"].get("changed"):
         parts.append(f'<div class="card banner">League points changed for: {_e(", ".join(r["coverage"]["changed"]))}. '
                      f'Update those rules in scoring_map.json.</div>')
@@ -305,7 +447,10 @@ def render_html(report):
     um_list = "".join(f"<li>{_e(p['name'])} <small>{_e(p['club'])}</small></li>" for p in um)
     parts.append(f'<div class="card"><h2>Unmatched</h2><div class="muted">{r["unmatched_count"]} Sleeper players have no FPL match '
                  f'and no projection. Fix them in overrides.json.</div>'
-                 + (f'<p>On your roster:</p><ul>{um_list}</ul>' if um else "") + "</div>")
+                 + (f'<p>On your roster:</p><ul>{um_list}</ul>' if um else "")
+                 + (f'<p>Betting markets we couldn\'t match to a fixture (add to "market_teams" in overrides.json):</p>'
+                    f'<ul>{"".join(f"<li>{_e(u)}</li>" for u in r.get("markets_unmatched", []))}</ul>'
+                    if r.get("markets_unmatched") else "") + "</div>")
 
     body = "\n".join(parts)
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'

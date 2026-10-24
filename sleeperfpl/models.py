@@ -9,6 +9,7 @@ class Fixture:
     home: bool
     difficulty: int        # 1-5, from the player's side
     kickoff: str | None    # ISO UTC
+    fixture_id: int | None = None
 
 
 @dataclass
@@ -28,6 +29,11 @@ class PlayerCtx:
     proj: float = 0.0
     trending_adds: int | None = None
     undroppable: bool = False      # owner said never suggest dropping this player
+    proj_v1: float = 0.0           # recent average x fixture difficulty, kept for comparison
+    proj_source: str = "difficulty"  # "market" when betting odds priced at least one fixture
+    market_flags: list = field(default_factory=list)  # "cs" / "goal": history and market disagree
+    p_goal_market: float | None = None
+    p_goal_hist: float | None = None
 
     def value(self) -> float:
         """Blend of recent output and projection, used for bench comparisons."""

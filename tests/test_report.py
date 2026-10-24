@@ -248,5 +248,100 @@ class SleeperSourceReportTests(unittest.TestCase):
         self.assertIn("🔒", page)
 
 
+from sleeperfpl.pricing import poisson_probs  # noqa: E402
+
+
+class MarketReportTests(unittest.TestCase):
+    SCORING = {"pos_m_g": 9, "pos_m_sot": 2, "pos_m_cs": 1, "pos_gk_cs": 8, "pos_gk_ga": -2, "pos_gk_sv": 2,
+               "pos_d_cs": 6, "pos_d_ga": -2}
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cfg = make_cfg(self.tmp)
+        self.cfg.stats_source = "sleeper"
+        self.conn = connect(":memory:")
+        seed(self.conn)
+        league = {"sport": "s", "season": "2026", "roster_positions": ["GK", "MID", "MID", "BN", "BN"],
+                  "scoring_settings": self.SCORING}
+        self.conn.execute("UPDATE sleeper_league SET data_json = ?", (json.dumps(league),))
+        for week in (6, 7):
+            self.stats("s1", week, {"min": 90, "pos_gk_cs": 1, "cs": 1, "pos_gk_sv": 3})
+            self.stats("s2", week, {"min": 90, "pos_m_sot": 2, "g": 0})
+            self.stats("s3", week, {"min": 90, "pos_m_sot": 1})
+        self.stats("s2", 9, {"min": 90, "pos_m_g": 3, "g": 3})   # in-progress week: must be ignored
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def stats(self, pid, week, st):
+        self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', ?, ?, ?, ?)", (week, pid, json.dumps(st), TS))
+
+    def quotes(self, fetched_at="2026-10-22T19:00:00Z", lh=1.8, la=1.0):
+        pr = poisson_probs(lh, la)
+        for market, side, p, line in (("1x2", "ARS", pr["home"], None), ("1x2", "TIE", pr["draw"], None),
+                                      ("1x2", "CFC", pr["away"], None), ("total", "over", pr["over"][2.5], 2.5)):
+            self.conn.execute("INSERT INTO market_quotes VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                              (fetched_at, "kalshi", "ARS", "CFC", "2026-10-24T11:30:00Z", market, line,
+                               "draw" if side == "TIE" else side, p - 0.01, p + 0.01, 500, "t"))
+
+    def player(self, r, name):
+        everyone = [s["player"] for s in r["xi"]["starters"] if s["player"]] + r["xi"]["bench"]
+        return next(p for p in everyone if p["name"] == name)
+
+    def test_matches_section_from_quotes(self):
+        self.quotes()
+        r = build_report(self.conn, self.cfg, NOW)
+        m = r["matches"][0]
+        self.assertEqual((m["home"], m["away"], m["sources"], m["stale"]), ("ARS", "CHE", ["kalshi"], False))
+        self.assertGreater(m["p_home"], m["p_away"])
+        self.assertEqual(r["markets_unmatched"], [])
+
+    def test_projection_uses_market_when_available(self):
+        self.quotes()
+        r = build_report(self.conn, self.cfg, NOW)
+        saka = self.player(r, "Bukayo Saka")
+        self.assertEqual(saka["proj_source"], "market")
+        self.assertNotEqual(saka["proj"], saka["proj_v1"])
+        self.assertEqual(saka["n"], 2)   # week 9 (in progress) excluded
+        self.assertEqual(r["projection_note"], "market")
+
+    def test_fixture_without_market_uses_v1(self):
+        r = build_report(self.conn, self.cfg, NOW)
+        saka = self.player(r, "Bukayo Saka")
+        self.assertEqual((saka["proj_source"], saka["proj"]), ("difficulty", saka["proj_v1"]))
+        self.assertEqual(r["projection_note"], "difficulty")
+        self.assertIsNone(r["matches"][0]["market"])
+
+    def test_stale_quotes_marked_and_unused(self):
+        self.quotes(fetched_at="2026-10-21T12:00:00Z")
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertTrue(r["matches"][0]["stale"])
+        self.assertEqual(self.player(r, "Bukayo Saka")["proj_source"], "difficulty")
+
+    def test_cs_flag(self):
+        self.quotes(lh=1.8, la=1.6)
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertIn("cs", self.player(r, "David Raya")["market_flags"])
+
+    def test_goal_flag_from_player_quote(self):
+        self.quotes()
+        self.conn.execute("INSERT INTO player_quotes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          ("2026-10-22T19:00:00Z", "kalshi", "ARS", "CFC", "2026-10-24T11:30:00Z", "Bukayo Saka",
+                           "ARS", "goal1", 0.59, 0.61, 0.6, 500, "t"))
+        r = build_report(self.conn, self.cfg, NOW)
+        saka = self.player(r, "Bukayo Saka")
+        self.assertAlmostEqual(saka["p_goal_market"], 0.6)
+        self.assertEqual(saka["p_goal_hist"], 0.0)
+        self.assertIn("goal", saka["market_flags"])
+
+    def test_html_shows_match_card_and_flag(self):
+        self.quotes(lh=1.8, la=1.6)
+        page = render_html(build_report(self.conn, self.cfg, NOW))
+        self.assertIn("Matches", page)
+        self.assertIn("⚑", page)
+        self.assertIn("mkt", page)
+
+
 if __name__ == "__main__":
     unittest.main()

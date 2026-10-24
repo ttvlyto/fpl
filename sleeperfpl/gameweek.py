@@ -65,6 +65,7 @@ def team_fixtures(fixtures, teams, gw):
         h, a = teams.get(f["team_h"]), teams.get(f["team_a"])
         if not h or not a:
             continue
-        out.setdefault(h, []).append(Fixture(a, True, int(f["team_h_difficulty"]), f.get("kickoff_time")))
-        out.setdefault(a, []).append(Fixture(h, False, int(f["team_a_difficulty"]), f.get("kickoff_time")))
+        fid = f.get("fixture_id")
+        out.setdefault(h, []).append(Fixture(a, True, int(f["team_h_difficulty"]), f.get("kickoff_time"), fid))
+        out.setdefault(a, []).append(Fixture(h, False, int(f["team_a_difficulty"]), f.get("kickoff_time"), fid))
     return out
