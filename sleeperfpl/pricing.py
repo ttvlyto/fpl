@@ -101,10 +101,23 @@ def _targets(quotes, home, away):
     return out
 
 
+def _identifiable(targets):
+    """True when the quotes can pin down both teams' expected goals, not just one number.
+    A lone total, BTTS, win price or one team's goal line fits a whole curve of (λh, λa)."""
+    kinds = {k for k, _, _ in targets}
+    outcome = kinds & {"home", "draw", "away"}
+    team_lines = kinds & {"home_over", "away_over"}
+    symmetric = kinds & {"over", "btts"}
+    if len(outcome) >= 2 or len(team_lines) == 2:
+        return True
+    side_specific = (outcome - {"draw"}) or team_lines
+    return bool(side_specific) and bool(symmetric or (outcome and team_lines))
+
+
 def fit_fixture(quotes, home, away):
-    """Fit (λh, λa) to already-usable quotes for one fixture; None without quotes."""
+    """Fit (λh, λa) to already-usable quotes for one fixture; None when they can't fix both."""
     targets = _targets(quotes, home, away)
-    if not targets:
+    if not targets or not _identifiable(targets):
         return None
     best = None
     for lh, la, pr in _grid_probs():
@@ -133,6 +146,9 @@ def fixture_odds(quotes, fixtures, teams, cfg, now, overrides):
         if fixture is None:
             unmatched.add(f"{q['source']}: {q['home']} vs {q['away']} ({(q.get('kickoff') or '')[:10]})")
             continue
+        kickoff = parse_time(fixture.get("kickoff_time"))
+        if kickoff and fetched >= kickoff:
+            continue  # in-play or settled prices aren't pre-match odds
         side = q["side"]
         if q["market"] in ("1x2", "team_total") and side not in ("draw",):
             side = team_code(q["source"], side, codes, overrides) or side

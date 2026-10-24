@@ -3,7 +3,7 @@ import unittest
 
 from sleeperfpl.db import connect
 from sleeperfpl.models import Fixture, PlayerCtx
-from sleeperfpl.report_card import log_projections, score_weeks, summary
+from sleeperfpl.report_card import log_goal_odds, log_projections, score_weeks, summary
 
 SC = {"pos_m_g": 5}
 KO = "2026-10-24T14:00:00Z"
@@ -62,6 +62,34 @@ class ReportCardTests(unittest.TestCase):
         weeks = [{"gw": 8, "mae_v1": 3.0, "mae_v2": 2.0, "n_v2": 5}, {"gw": 9, "mae_v1": 2.0, "mae_v2": 2.5, "n_v2": 5}]
         self.assertEqual(summary(weeks), "v2 (market) beat v1 (difficulty) in 1 of 2 weeks")
         self.assertEqual(summary(weeks[:1]), "not enough weeks yet")
+
+
+class PairedComparisonTests(unittest.TestCase):
+    def test_v1_compared_on_same_players_as_v2(self):
+        conn = connect(":memory:")
+        log_projections(conn, "2026", 9, [pl("a", 4, 5), pl("b", 0)], "2026-10-23T10:00:00Z")   # b: no v2
+        for pid, g in (("a", 1), ("b", 2)):
+            conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, ?, ?, 'x')",
+                         (pid, json.dumps({"min": 90, "pos_m_g": g})))
+        week = score_weeks(conn, "2026", SC, 9)[0]
+        self.assertAlmostEqual(week["mae_v1"], 5.5)          # all players
+        self.assertAlmostEqual(week["mae_v1_paired"], 1.0)   # only players with v2
+        self.assertAlmostEqual(week["mae_v2"], 0.0)
+
+    def test_summary_uses_paired(self):
+        weeks = [{"gw": 8, "mae_v1": 9.0, "mae_v1_paired": 1.0, "mae_v2": 2.0, "n_v2": 5},
+                 {"gw": 9, "mae_v1": 9.0, "mae_v1_paired": 1.0, "mae_v2": 2.0, "n_v2": 5}]
+        self.assertEqual(summary(weeks), "v2 (market) beat v1 (difficulty) in 0 of 2 weeks")
+
+    def test_goal_odds_row_without_projection(self):
+        conn = connect(":memory:")
+        log_projections(conn, "2026", 9, [pl("a", 4)], "2026-10-23T10:00:00Z")
+        log_goal_odds(conn, "2026", 9, [("a", KO, 0.6)], "2026-10-24T11:00:00Z")
+        conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, 'a', ?, 'x')",
+                     (json.dumps({"min": 90, "g": 1, "pos_m_g": 1}),))
+        week = score_weeks(conn, "2026", SC, 9)[0]
+        self.assertAlmostEqual(week["mae_v1"], 1.0)
+        self.assertAlmostEqual(week["brier_goal"], 0.16)
 
 
 if __name__ == "__main__":

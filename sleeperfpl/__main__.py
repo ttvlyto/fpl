@@ -84,15 +84,23 @@ def cmd_matchday(cfg, conn, args):
         print(f"matchday: nothing kicks off within {cfg.matchday_window_hours:g} h or just finished; skipped")
         return
     league = _league(conn)
-    print(f"rosters: {fetch_rosters(conn, cfg.league_id)}")
-    print(f"fpl fixtures: {fetch_fixtures(conn)}")
-    print(f"kalshi (with players): {fetch_kalshi(conn, players=True)} quotes")
-    print(f"polymarket: {fetch_polymarket(conn)} quotes")
+
+    def step(label, fn):
+        # One failed source must not stop the rebuild (and its 0-minute alerts).
+        try:
+            print(f"{label}: {fn()}")
+        except Exception as e:  # noqa: BLE001 - unattended cron: warn and carry on
+            sys.stderr.write(f"warning: {label} failed: {e}\n")
+
+    step("rosters", lambda: fetch_rosters(conn, cfg.league_id))
+    step("fpl fixtures", lambda: fetch_fixtures(conn))
+    step("kalshi (with players)", lambda: fetch_kalshi(conn, players=True))
+    step("polymarket", lambda: fetch_polymarket(conn))
     events = [dict(r) for r in latest(conn, "fpl_events")]
     gw = live_gameweek(events, [dict(r) for r in latest(conn, "fpl_fixtures")], now)
     if gw:
-        weeks = fetch_sleeper_stats(conn, league["sport"], str(league.get("season", "")), gw)
-        print(f"sleeper stats: {weeks} week(s) fetched (live GW{gw})")
+        step(f"sleeper stats (live GW{gw})",
+             lambda: fetch_sleeper_stats(conn, league["sport"], str(league.get("season", "")), gw))
     cmd_build(cfg, conn, args)
 
 

@@ -65,7 +65,10 @@ def fetch_kalshi(conn, *, players=False, get=get_json):
     try:
         for series, market in KALSHI_MATCH_SERIES.items():
             for m in _kalshi_markets(series, get):
-                home, away, kickoff, bid, ask, depth = _kalshi_common(m)
+                try:
+                    home, away, kickoff, bid, ask, depth = _kalshi_common(m)
+                except (KeyError, IndexError, TypeError, ValueError):
+                    continue  # unexpected market shape: skip it, keep the rest
                 last = m["ticker"].rsplit("-", 1)[-1]
                 line, side = m.get("floor_strike"), None
                 if market == "1x2":
@@ -80,7 +83,11 @@ def fetch_kalshi(conn, *, players=False, get=get_json):
         if players:
             for series in KALSHI_PLAYER_SERIES:
                 for m in _kalshi_markets(series, get):
-                    home, away, kickoff, bid, ask, depth = _kalshi_common(m)
+                    try:
+                        home, away, kickoff, bid, ask, depth = _kalshi_common(m)
+                        team = m["ticker"].split("-")[2][:3]
+                    except (KeyError, IndexError, TypeError, ValueError):
+                        continue
                     if series == "KXEPLGOAL":
                         market = {0.5: "goal1", 1.5: "goal2"}.get(m.get("floor_strike"))
                         if market is None:
@@ -88,7 +95,6 @@ def fetch_kalshi(conn, *, players=False, get=get_json):
                     else:
                         market = "soa"
                     player = (m.get("title") or "").split(":", 1)[0].strip()
-                    team = m["ticker"].split("-")[2][:3]
                     props.append(("kalshi", home, away, kickoff, player, team, market, bid, ask,
                                   _f(m.get("last_price_dollars")), depth, m["ticker"]))
     except FetchError as e:
@@ -137,7 +143,10 @@ def fetch_polymarket(conn, get=get_json):
                 side = "draw" if "draw" in (m.get("question") or "").lower() else (m.get("slug") or "").rsplit("-", 1)[-1].upper()
                 quotes.append(("polymarket", home, away, kickoff, "1x2", None, side, bid, ask, depth, m.get("slug")))
             elif kind == "totals":
-                outcomes = json.loads(m.get("outcomes") or "[]")
+                try:
+                    outcomes = json.loads(m.get("outcomes") or "[]")
+                except (TypeError, ValueError):
+                    continue
                 if outcomes[:1] != ["Over"]:
                     continue
                 quotes.append(("polymarket", home, away, kickoff, "total", _f(m.get("line")), "over",

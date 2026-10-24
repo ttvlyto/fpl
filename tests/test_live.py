@@ -51,5 +51,27 @@ class UnlikelyTests(unittest.TestCase):
         self.assertEqual(out, {"szoboszlai": "not in market lineup", "saliba": "injury: Questionable"})
 
 
+class ReviewFixLiveTests(unittest.TestCase):
+    def test_bench_needs_upcoming_fixture_and_fitness(self):
+        starters = [("M", p("sat", "M", "ARS"))]
+        no_match = p("blank", "M", "CHE", avg=9)
+        injured = p("hurt", "M", "LIV", avg=8, flag="out")
+        fit = p("ok", "M", "LIV", avg=3)
+        out = zero_minute_replacements(starters, [no_match, injured, fit], {"ARS"}, {"ARS"}, {}, ELIG,
+                                       upcoming_teams={"LIV"})
+        self.assertEqual(out[0].bench.sleeper_id, "ok")
+
+    def test_unlikely_only_for_known_attackers(self):
+        gk = p("raya", "GK", "ARS")
+        gk.name = "David Raya"
+        mid = p("odegaard", "M", "ARS")
+        mid.name = "Martin Odegaard"
+        new = p("newbie", "M", "ARS")
+        new.name = "Never Listed"
+        out = unlikely_to_play([("GK", gk), ("M", mid), ("M", new)], {"ARS": {"bukayo saka"}}, {},
+                               known_names={"martin odegaard", "david raya"})
+        self.assertEqual(out, {"odegaard": "not in market lineup"})
+
+
 if __name__ == "__main__":
     unittest.main()

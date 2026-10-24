@@ -19,12 +19,12 @@ from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
 from .live import unlikely_to_play, zero_minute_replacements
-from .markets import latest_quotes, mid, team_code, usable
+from .markets import find_fixture, latest_quotes, mid, team_code, usable
 from .models import PlayerCtx
 from .pricing import fixture_odds
 from .projection import project
 from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
-from .report_card import log_projections, score_weeks, summary
+from .report_card import log_goal_odds, log_projections, score_weeks, summary
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
 from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points, sleeper_weeks
 
@@ -85,8 +85,9 @@ def _share(weeks, test):
     return sum(1 for w in weeks if test(w)) / len(weeks) if weeks else None
 
 
-def _goal_quotes(conn, cfg, now, codes, overrides):
-    """{(normalized player name, FPL team code): P(1+ goals)} from fresh, usable quotes."""
+def _goal_quotes(conn, cfg, now, codes, overrides, fixtures, teams):
+    """{(normalized player name, FPL team code, fixture_id): P(1+ goals)} from fresh, usable,
+    pre-kickoff quotes, each tied to the exact fixture it prices."""
     cutoff = now - timedelta(hours=cfg.market_stale_hours)
     out = {}
     for q in sorted(latest_quotes(conn, "player_quotes"), key=lambda q: q["fetched_at"]):
@@ -94,8 +95,12 @@ def _goal_quotes(conn, cfg, now, codes, overrides):
         if q["market"] != "goal1" or not fetched or fetched < cutoff or not usable(q, cfg):
             continue
         team = team_code(q["source"], q["team"], codes, overrides)
-        if team:
-            out[(normalize_name(q["player"]), team)] = mid(q)
+        home = team_code(q["source"], q["home"], codes, overrides)
+        away = team_code(q["source"], q["away"], codes, overrides)
+        fixture = find_fixture(home, away, q.get("kickoff"), fixtures, teams) if home and away else None
+        kickoff = parse_time(fixture.get("kickoff_time")) if fixture else None
+        if team and fixture and kickoff and fetched < kickoff:
+            out[(normalize_name(q["player"]), team, fixture["fixture_id"])] = mid(q)
     return out
 
 
@@ -161,7 +166,7 @@ def build_report(conn, cfg, now):
         team_lams.setdefault(o.home, []).append(o.lam_home)
         team_lams.setdefault(o.away, []).append(o.lam_away)
     baseline = {t: sum(v) / len(v) for t, v in team_lams.items()}
-    goal_quotes = _goal_quotes(conn, cfg, now, codes, overrides)
+    goal_quotes = _goal_quotes(conn, cfg, now, codes, overrides, fixtures, teams)
 
     for p in players:
         p["positions"] = json.loads(p["positions_json"] or "[]")
@@ -220,8 +225,9 @@ def build_report(conn, cfg, now):
         listed = [pl for group in ranked.values() for pl in group]
         log_projections(conn, sleeper_season, gw.gw, roster + listed, made_at)
     card = score_weeks(conn, sleeper_season, scoring, last_finished) if use_sleeper else []
+    club_of = {sid: teams.get(el_by_id[fid]["team_id"]) for sid, fid in match.mapping.items() if fid in el_by_id}
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
-                       {p["player_id"]: p for p in players}, sleeper_season, fodds)
+                       {p["player_id"]: p for p in players}, sleeper_season, fodds, club_of, goal_quotes)
     target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
     matches = [_match_entry(f, teams, fodds.get(f["fixture_id"]) or all_odds.get(f["fixture_id"]),
                             f["fixture_id"] not in fodds) for f in target]
@@ -290,13 +296,24 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
         if abs(hist_cs - mkt_cs) >= cfg.flag_cs_gap:
             pl.market_flags.append("cs")
     pl.p_goal_hist = _share(weeks, lambda w: (w.get("g") or 0) >= 1)
-    pl.p_goal_market = goal_quotes.get((normalize_name(pl.name), pl.club))
+    pl.p_goal_market = (goal_quotes.get((normalize_name(pl.name), pl.club, pl.fixtures[0].fixture_id))
+                        if pl.fixtures else None)
     if pl.p_goal_market is not None and abs(pl.p_goal_market - pl.p_goal_hist) >= cfg.flag_goal_gap:
         pl.market_flags.append("goal")
 
 
+def _club_minutes_in(minutes, club_of):
+    """{club: (players with minutes > 0, matched players)} from this week's stats."""
+    played, size = {}, {}
+    for sid, club in club_of.items():
+        size[club] = size.get(club, 0) + 1
+        if (minutes.get(sid) or 0) > 0:
+            played[club] = played.get(club, 0) + 1
+    return {club: (played.get(club, 0), n) for club, n in size.items()}
+
+
 def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
-                players_by_id, sleeper_season, fodds):
+                players_by_id, sleeper_season, fodds, club_of, goal_quotes):
     gw = live_gameweek(events, fixtures, now)
     if gw is None:
         return None
@@ -319,15 +336,24 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
                     in_progress.add(code)   # over, but its minutes aren't in yet
             else:
                 in_progress.add(code)
-    finished = finished_any - in_progress
-
-    starter_ids = list(mine.get("starters") or [])
-    starters = [(slot, ctx.get(sid)) for slot, sid in zip(slots, starter_ids)]
-    bench = [pl for pl in ctx.values() if pl.on_roster and pl.sleeper_id not in starter_ids]
     minutes = {}
     for pid, raw in conn.execute("SELECT player_id, stats_json FROM sleeper_stats WHERE season = ? AND week = ?",
                                  (sleeper_season, gw)):
         minutes[pid] = json.loads(raw).get("min") or 0
+    # Trust a club's minutes only once its players actually show up in the stats
+    # (Sleeper can lag, and a delayed kickoff looks like a finished match).
+    counts = _club_minutes_in(minutes, club_of)
+    trusted = {c for c, (played, n) in counts.items() if played >= max(1, min(7, n // 2))}
+    finished = (finished_any - in_progress) & trusted
+    upcoming = set()
+    for f in live_fx:
+        k = parse_time(f.get("kickoff_time"))
+        if k and k > now:
+            upcoming |= {teams.get(f["team_h"]), teams.get(f["team_a"])}
+
+    starter_ids = list(mine.get("starters") or [])
+    starters = [(slot, ctx.get(sid)) for slot, sid in zip(slots, starter_ids)]
+    bench = [pl for pl in ctx.values() if pl.on_roster and pl.sleeper_id not in starter_ids]
     cutoff = now - timedelta(hours=cfg.market_stale_hours)
     by_team = {}
     for q in latest_quotes(conn, "player_quotes"):
@@ -336,9 +362,25 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
         if fetched and fetched >= cutoff and team:
             by_team.setdefault(team, set()).add(normalize_name(q["player"]))
     injury = {sid: (players_by_id.get(sid) or {}).get("injury_status") for sid in starter_ids}
+    known = {normalize_name(r[0]) for r in conn.execute("SELECT DISTINCT player FROM player_quotes")}
     unlikely = unlikely_to_play([s for s in starters if s[1] and s[1].club not in started], by_team,
-                                {k: v for k, v in injury.items() if v})
-    reps = zero_minute_replacements(starters, bench, finished, started, minutes, cfg.slot_eligibility)
+                                {k: v for k, v in injury.items() if v}, known_names=known)
+    reps = zero_minute_replacements(starters, bench, finished, started, minutes, cfg.slot_eligibility,
+                                    upcoming_teams=upcoming)
+
+    # Match-day goal odds for the report card, logged under the week being played.
+    odds_rows = []
+    for f in live_fx:
+        k = parse_time(f.get("kickoff_time"))
+        if not k or k <= now:
+            continue
+        for pl in ctx.values():
+            if pl.club in (teams.get(f["team_h"]), teams.get(f["team_a"])):
+                p = goal_quotes.get((normalize_name(pl.name), pl.club, f["fixture_id"]))
+                if p is not None:
+                    odds_rows.append((pl.sleeper_id, f.get("kickoff_time"), p))
+    if odds_rows:
+        log_goal_odds(conn, sleeper_season, gw, odds_rows, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
     return {
         "gameweek": gw,
         "starters": [{"slot": s, "player": _player_dict(pl) if pl else None} for s, pl in starters],

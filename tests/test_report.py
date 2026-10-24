@@ -394,5 +394,35 @@ class LiveReportTests(unittest.TestCase):
         self.assertEqual(build_report(self.conn, self.cfg, after)["live"]["replacements"], [])
 
 
+class ReviewFixReportMarketTests(MarketReportTests):
+    def test_goal_quote_for_other_fixture_not_attached(self):
+        self.quotes()
+        self.conn.execute("INSERT INTO player_quotes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          ("2026-10-22T19:00:00Z", "kalshi", "ARS", "LFC", "2026-10-17T11:30:00Z", "Bukayo Saka",
+                           "ARS", "goal1", 0.59, 0.61, 0.6, 500, "t"))
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertIsNone(self.player(r, "Bukayo Saka")["p_goal_market"])
+
+
+class ReviewFixLiveReportTests(LiveReportTests):
+    def test_club_needs_players_with_minutes_in_stats(self):
+        # stats fetched after the match, but nobody from ARS has minutes yet (Sleeper lag)
+        self.conn.execute("UPDATE sleeper_stats SET stats_json = ? WHERE week = 9", (json.dumps({"min": 0}),))
+        after = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
+        self.assertEqual(build_report(self.conn, self.cfg, after)["live"]["replacements"], [])
+
+    def test_matchday_builds_even_if_fetches_fail(self):
+        from unittest import mock
+        import sleeperfpl.__main__ as cli
+        built = []
+        boom = mock.Mock(side_effect=RuntimeError("down"))
+        with mock.patch.object(cli, "fetch_rosters", boom), mock.patch.object(cli, "fetch_fixtures", boom), \
+             mock.patch.object(cli, "fetch_kalshi", boom), mock.patch.object(cli, "fetch_polymarket", boom), \
+             mock.patch.object(cli, "matchday_due", return_value=True), \
+             mock.patch.object(cli, "cmd_build", lambda *a: built.append(1)):
+            cli.cmd_matchday(self.cfg, self.conn, mock.Mock(force=False))
+        self.assertEqual(built, [1])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -75,5 +75,28 @@ class PricingTests(unittest.TestCase):
                          [("kalshi", "2026-10-29T10:00:00Z"), ("polymarket", "2026-10-29T11:00:00Z")])
 
 
+class IdentifiabilityTests(unittest.TestCase):
+    def test_underdetermined_quotes_give_no_fit(self):
+        qs = model_quotes(1.6, 1.1)
+        by = {(q["market"], q["side"]): q for q in qs}
+        for only in (["total"], ["home"], ["btts"], ["team_home"]):
+            pick = {"total": [by[("total", "over")]], "home": [by[("1x2", "ARS")]],
+                    "btts": [by[("btts", "yes")]], "team_home": [by[("team_total", "ARS")]]}[only[0]]
+            with self.subTest(only=only):
+                self.assertIsNone(fit_fixture(pick, "ARS", "HUL"))
+
+    def test_enough_quotes_fit(self):
+        qs = model_quotes(1.6, 1.1)
+        by = {(q["market"], q["side"]): q for q in qs}
+        self.assertIsNotNone(fit_fixture([by[("1x2", "ARS")], by[("total", "over")]], "ARS", "HUL"))
+        self.assertIsNotNone(fit_fixture([by[("team_total", "ARS")], by[("team_total", "HUL")]], "ARS", "HUL"))
+        self.assertIsNotNone(fit_fixture([by[("1x2", "ARS")], by[("1x2", "HUL")]], "ARS", "HUL"))
+
+    def test_in_play_quotes_dropped(self):
+        late = model_quotes(1.5, 1.0, fetched_at="2026-10-31T16:00:00Z")   # after the 15:00 kickoff
+        odds, _ = fixture_odds(late, FIXTURES, TEAMS, CFG, datetime(2026, 10, 31, 17, tzinfo=timezone.utc), {})
+        self.assertEqual(odds, {})
+
+
 if __name__ == "__main__":
     unittest.main()

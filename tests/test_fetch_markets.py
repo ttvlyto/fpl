@@ -122,5 +122,16 @@ class PolymarketTests(unittest.TestCase):
         self.assertEqual(fetch_polymarket(conn, get=boom), 0)
 
 
+class MalformedTests(unittest.TestCase):
+    def test_malformed_markets_skipped(self):
+        conn = connect(":memory:")
+        bad = [{"ticker": "KXEPLGAME-X", "event_ticker": "KXEPLGAME"}] + GAME[:1]
+        n = fetch_kalshi(conn, get=kalshi_get({("KXEPLGAME", ""): {"markets": bad}}))
+        self.assertEqual(n, 1)
+        events = PM_EVENTS + [{"title": "A vs B", "slug": "epl-aaa-bbb-2026", "markets": [{"sportsMarketType": "totals",
+                                                                                      "outcomes": "not json"}]}]
+        self.assertEqual(fetch_polymarket(conn, get=lambda url, **kw: events), 4)
+
+
 if __name__ == "__main__":
     unittest.main()
