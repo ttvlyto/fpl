@@ -44,3 +44,12 @@ def find_fixture(home, away, kickoff, fixtures, teams):
         if when and k and abs((k - when).total_seconds()) <= MATCH_WINDOW_HOURS * 3600:
             return f
     return None
+
+
+def latest_quotes(conn, table):
+    """Newest snapshot per source (Kalshi and Polymarket are fetched separately)."""
+    if table not in ("market_quotes", "player_quotes"):
+        raise ValueError(f"not a quote table: {table!r}")
+    return [dict(r) for r in conn.execute(
+        f"SELECT q.* FROM {table} q JOIN (SELECT source, MAX(fetched_at) AS ts FROM {table} GROUP BY source) m "
+        f"ON q.source = m.source AND q.fetched_at = m.ts")]
