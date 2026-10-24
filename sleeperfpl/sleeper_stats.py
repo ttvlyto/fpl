@@ -60,16 +60,23 @@ def has_stats(conn, season):
     return conn.execute("SELECT 1 FROM sleeper_stats WHERE season = ? LIMIT 1", (season,)).fetchone() is not None
 
 
-def sleeper_history(conn, season, player_id, scoring_settings):
-    """League points per played week (minutes > 0), most recent first."""
-    rows = conn.execute("SELECT stats_json FROM sleeper_stats WHERE season = ? AND player_id = ? "
+def sleeper_weeks(conn, season, player_id, max_week=None):
+    """Raw stats for played weeks (minutes > 0), most recent first, up to `max_week`."""
+    rows = conn.execute("SELECT week, stats_json FROM sleeper_stats WHERE season = ? AND player_id = ? "
                         "ORDER BY week DESC", (season, str(player_id))).fetchall()
     out = []
-    for (raw,) in rows:
+    for week, raw in rows:
+        if max_week is not None and week > max_week:
+            continue  # the game week in progress never enters averages
         stats = json.loads(raw)
         if (stats.get("min") or 0) > 0:
-            out.append(sleeper_points(stats, scoring_settings))
+            out.append(stats)
     return out
+
+
+def sleeper_history(conn, season, player_id, scoring_settings, max_week=None):
+    """League points per played week (minutes > 0), most recent first."""
+    return [sleeper_points(s, scoring_settings) for s in sleeper_weeks(conn, season, player_id, max_week)]
 
 
 def last_stats_week(conn):

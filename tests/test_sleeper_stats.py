@@ -3,7 +3,7 @@ import unittest
 
 from sleeperfpl.db import connect, meta_get
 from sleeperfpl.http import FetchError
-from sleeperfpl.sleeper_stats import fetch_sleeper_stats, sleeper_history, sleeper_points
+from sleeperfpl.sleeper_stats import fetch_sleeper_stats, sleeper_history, sleeper_points, sleeper_weeks
 
 SCORING = {"pos_f_g": 9, "pos_f_sot": 2, "pos_m_g": 9, "pos_f_min": 0}
 
@@ -52,6 +52,16 @@ class SleeperStatsTests(unittest.TestCase):
         fetch_sleeper_stats(self.conn, "s", "2026", 3, get=getter(weeks))
         self.assertEqual(sleeper_history(self.conn, "2026", "p1", SCORING), [2, 9])
         self.assertEqual(sleeper_history(self.conn, "2025", "p1", SCORING), [])
+
+
+class MaxWeekTests(unittest.TestCase):
+    def test_history_and_weeks_respect_max_week(self):
+        conn = connect(":memory:")
+        weeks = {7: {"p1": {"pos_f_g": 1, "min": 90}}, 8: {"p1": {"pos_f_g": 2, "min": 90}}}
+        fetch_sleeper_stats(conn, "s", "2026", 8, get=getter(weeks))
+        self.assertEqual(sleeper_history(conn, "2026", "p1", SCORING, max_week=7), [9])
+        self.assertEqual(len(sleeper_history(conn, "2026", "p1", SCORING)), 2)
+        self.assertEqual(sleeper_weeks(conn, "2026", "p1", 7), [{"pos_f_g": 1, "min": 90}])
 
 
 if __name__ == "__main__":
