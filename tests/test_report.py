@@ -129,6 +129,63 @@ class ReportTests(unittest.TestCase):
         build_report(self.conn, self.cfg, NOW)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM recommendation_log").fetchone()[0], 1)
 
+    def add_opinion(self, xi, swaps=(), gw=9, reason="Starts every week"):
+        self.conn.execute("INSERT INTO second_opinion_log VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                          ("2026-10-22T19:00:00Z", "", gw, "2026-10-24T11:30:00Z", "claude-opus-5-5",
+                           json.dumps([{"player_id": pid, "slot": slot, "reason": reason} for slot, pid in xi]),
+                           json.dumps([{"drop_id": d, "add_id": a, "reason": "Better fixture"} for d, a in swaps]),
+                           json.dumps([{"fixture": "ARS v CHE", "note": "Chelsea unbeaten in 3"}]),
+                           "Back the Arsenal core", 1000, 200))
+
+    def test_no_second_opinion_is_none_and_page_renders(self):
+        seed(self.conn)
+        r = build_report(self.conn, self.cfg, NOW)
+        self.assertIsNone(r["second_opinion"])
+        self.assertNotIn("second opinion", render_html(r))
+
+    def test_second_opinion_rendered_with_agreement(self):
+        seed(self.conn)
+        self.add_opinion([("GK", "s1"), ("MID", "s2"), ("MID", "s4")], [("s3", "s5")])
+        r = build_report(self.conn, self.cfg, NOW)
+        so = r["second_opinion"]
+        self.assertEqual((so["agree_xi"], so["xi_size"]), (2, 3))
+        self.assertEqual([x["in_tool_xi"] for x in so["xi"]], [True, True, False])
+        self.assertEqual(so["xi"][0]["name"], "David Raya")
+        self.assertEqual(so["swaps"][0]["add"]["name"], "Cole Palmer")
+        self.assertEqual(so["changed"], [])
+        page = render_html(r)
+        self.assertIn("Claude&#x27;s second opinion", page)
+        self.assertIn("Agrees on 2 of 3 starters", page)
+        self.assertIn("Starts every week", page)
+        self.assertIn("Chelsea unbeaten in 3", page)
+        self.assertIn("Claude only", page)
+        json.dumps(r)
+
+    def test_opinion_for_another_week_is_ignored(self):
+        seed(self.conn)
+        self.add_opinion([("GK", "s1")], gw=8)
+        self.assertIsNone(build_report(self.conn, self.cfg, NOW)["second_opinion"])
+
+    def test_changed_lists_players_now_elsewhere(self):
+        seed(self.conn)
+        self.conn.execute("UPDATE sleeper_rosters SET players_json = '[\"s6\"]' WHERE roster_id = 2")
+        self.add_opinion([("GK", "s1"), ("MID", "s6"), ("MID", "s99")])
+        so = build_report(self.conn, self.cfg, NOW)["second_opinion"]
+        self.assertEqual(so["changed"], ["Marc Cucurella", "s99"])
+        self.assertIn("Roster changes since this opinion: Marc Cucurella, s99", render_html(build_report(self.conn, self.cfg, NOW)))
+
+    def test_own_add_now_on_my_roster_is_not_a_change(self):
+        seed(self.conn, roster=("s1", "s2", "s3", "s5"))
+        self.add_opinion([("GK", "s1"), ("MID", "s2"), ("MID", "s5")], [("s4", "s5")])
+        self.assertEqual(build_report(self.conn, self.cfg, NOW)["second_opinion"]["changed"], [])
+
+    def test_reason_text_is_escaped(self):
+        seed(self.conn)
+        self.add_opinion([("GK", "s1")], reason="<script>x</script>")
+        page = render_html(build_report(self.conn, self.cfg, NOW))
+        self.assertNotIn("<script>x", page)
+        self.assertIn("&lt;script&gt;x", page)
+
     def test_week_in_progress_banner(self):
         seed(self.conn)
         self.assertIsNone(build_report(self.conn, self.cfg, NOW)["in_progress"])

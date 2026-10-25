@@ -311,6 +311,40 @@ def build_report(conn, cfg, now, *, log=True, context=None):
         "free_agents": {pos: [_player_dict(pl) for pl in group] for pos, group in sorted(ranked.items())},
         "unmatched_rostered": [_player_dict(pl) for pl in roster if pl.fpl_id is None],
         "unmatched_count": len(match.unmatched),
+        "second_opinion": _second_opinion_block(conn, sleeper_season, gw.gw, {p["player_id"]: p for p in players},
+                                                my_ids, taken, lineup, swaps),
+    }
+
+
+def _second_opinion_block(conn, season, gw, players, my_ids, taken, lineup, swaps):
+    """The newest saved second opinion for game week `gw`, set against the tool's current picks."""
+    row = conn.execute("SELECT made_at, model, summary, xi_json, swaps_json, notes_json FROM second_opinion_log "
+                       "WHERE season = ? AND gw = ? ORDER BY made_at DESC LIMIT 1", (season, gw)).fetchone() if gw else None
+    if row is None:
+        return None
+    xi, pairs, notes = (json.loads(row[k] or "[]") for k in ("xi_json", "swaps_json", "notes_json"))
+
+    def name(pid):
+        p = players.get(pid)
+        return (p and p["name"]) or pid
+
+    tool_xi = {pl.sleeper_id for _, pl in lineup.starters if pl}
+    tool_swaps = {(s.drop.sleeper_id, s.add.sleeper_id) for s in swaps}
+    adds = {s["add_id"] for s in pairs}
+    others = set(taken) - my_ids
+    changed = [pid for pid in [x["player_id"] for x in xi] + [s["add_id"] for s in pairs]
+               if (pid in adds and pid in others) or (pid not in adds and pid not in my_ids)]
+    return {
+        "made_at": row["made_at"], "model": row["model"], "summary": row["summary"],
+        "xi": [{"slot": x["slot"], "sleeper_id": x["player_id"], "name": name(x["player_id"]),
+                "club": (players.get(x["player_id"]) or {}).get("team"), "reason": x["reason"],
+                "in_tool_xi": x["player_id"] in tool_xi} for x in xi],
+        "swaps": [{"drop": {"sleeper_id": s["drop_id"], "name": name(s["drop_id"])},
+                   "add": {"sleeper_id": s["add_id"], "name": name(s["add_id"])}, "reason": s["reason"],
+                   "in_tool": (s["drop_id"], s["add_id"]) in tool_swaps} for s in pairs],
+        "notes": notes,
+        "agree_xi": sum(1 for x in xi if x["player_id"] in tool_xi), "xi_size": len(xi),
+        "changed": [name(pid) for pid in dict.fromkeys(changed)],
     }
 
 
@@ -691,6 +725,33 @@ def _label_name(x):
     return f"FPL: {'injured' if cell[0] == 'i' else 'doubtful'} {cell[1:]}%"
 
 
+def _second_opinion_card(r):
+    so = r.get("second_opinion")
+    if not so:
+        return ""
+    out = [f'<div class="card"><h2>Claude&#x27;s second opinion</h2>'
+           f'<div class="muted">Made {_e(so["made_at"])} by {_e(so["model"])} · '
+           f'Agrees on {so["agree_xi"]} of {so["xi_size"]} starters</div>']
+    if so["changed"]:
+        out.append(f'<div class="banner">Roster changes since this opinion: {_e(", ".join(so["changed"]))}</div>')
+    out.append(f'<p>{_e(so["summary"])}</p>')
+    rows = [f'<tr><td>{_e(x["slot"])}</td><td>{_e(x["name"])}'
+            + ('' if x["in_tool_xi"] else ' <span class="flag">Claude only</span>')
+            + f'</td><td>{_e(x["reason"])}</td></tr>' for x in so["xi"]]
+    out.append('<table><thead><tr><th>Slot</th><th>Player</th><th>Why</th></tr></thead>'
+               f'<tbody>{"".join(rows)}</tbody></table>')
+    prefix = "Waiver claim: " if r["mode"] == "waiver" else ""
+    for s in so["swaps"]:
+        agree = ' <span class="flag">tool agrees</span>' if s["in_tool"] else ""
+        out.append(f'<div class="tip">{prefix}Drop {_e(s["drop"]["name"])}, add {_e(s["add"]["name"])}: '
+                   f'{_e(s["reason"])}{agree}</div>')
+    if so["notes"]:
+        out.append("<ul>" + "".join(f'<li><b>{_e(n["fixture"])}</b>: {_e(n["note"])}</li>' for n in so["notes"])
+                   + "</ul>")
+    out.append("</div>")
+    return "".join(out)
+
+
 def _live_card(r):
     live = r.get("live")
     if not live:
@@ -795,6 +856,7 @@ def render_html(report):
         tips.append(f'<div class="tip">{prefix}Drop {_e(s["drop"]["name"])}, add {_e(s["add"]["name"])}: '
                     f'+{_num(s["gain"])} {what}</div>')
     parts.append(f'<div class="card"><h2>Swap tips</h2>{"".join(tips) or "<div class=muted>No swap clears the threshold this week.</div>"}</div>')
+    parts.append(_second_opinion_card(r))
 
     fa = ['<div class="card"><h2>Top free agents</h2>']
     for pos, group in r["free_agents"].items():

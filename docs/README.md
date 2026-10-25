@@ -382,7 +382,8 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
   `generated_at`, `gameweek`, `mode`, `first_kickoff`, `stats_source`,
   `sources`, `coverage`, `projection_note`, `xi`, `swaps`, `free_agents`,
   `matches`, `markets_unmatched`, `live`, `report_card`,
-  `undroppable_unmatched`, `unmatched_rostered`, `unmatched_count`.
+  `undroppable_unmatched`, `unmatched_rostered`, `unmatched_count`, `in_progress`,
+  `second_opinion`.
 
 Both files are written atomically (temp file, then rename). The page is
 self-contained (inline CSS and JS, no external assets) and tables sort when you
@@ -397,6 +398,12 @@ Details of `report.json` worth knowing:
 - `projection_note` is `"market"` (all fixtures priced), `"mixed"`, or
   `"difficulty"`.
 - `live` is `null` when there is no live game week.
+- `second_opinion` is `null` until `second-opinion` has saved an answer for
+  the target game week. Otherwise it has `made_at`, `model`, `summary`, `xi`
+  (`slot`, `sleeper_id`, `name`, `club`, `reason`, `in_tool_xi`), `swaps`
+  (`drop`, `add`, `reason`, `in_tool`), `notes` (`fixture`, `note`),
+  `agree_xi`, `xi_size` and `changed` (names in the opinion that have since
+  left your roster or been taken by another team).
 - `report_card` has `weeks` (per finished week: `n`, `mae_v1` over everyone,
   `mae_v1_played`, `by_cat_v1` per outcome group `dnp`/`low`/`mid`/`haul`,
   `rank_v1`, the v2 and `ep_next` comparisons, `mae_v1m`/`rank_v1m` beside v1 on
