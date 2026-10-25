@@ -23,7 +23,10 @@ code layout.
 
 ## What the page shows
 
-`build` writes `site/index.html` with, from the top:
+`build` writes `site/index.html`. Cards are rendered in this order: This week
+(live) (only during a live game week), matchup, Starting XIs / Best XI, swap
+tips, Fixtures, Claude's second opinion, top free agents, Report card,
+Unmatched. The list below describes them (not in page order):
 
 - a **matchup** card (needs a `schedule` in config.json): you against this
   week's head-to-head opponent, with both teams' records and projected points
@@ -39,8 +42,8 @@ code layout.
 - **Starting XIs** for both sides with a **Pitch / List** switch (the page
   remembers your choice on that phone). On the pitch each player sits in the
   row of his first listed position, with his club badge, surname and points.
-  The list view for you is the full Best XI table with bench; during a live
-  week that table moves to its own **Best XI · GW<n>** card for the next week;
+  The list view for you is the full Best XI table with bench; while a
+  scheduled week is being played that table moves to its own **Best XI · GW<n>** card for the next week;
 - your **best starting XI** (as its own card when there is no matchup), using
   only lineups your league's roster slots allow;
 - **swap tips**, either an XI gain ("Drop X, add Y: +1.9 projected") or a
@@ -52,7 +55,7 @@ code layout.
   tip's drop. Tips are labelled as waiver claims once the game week has started (players are instant free agents until the
   week's first kickoff, then go through waivers);
 - **Claude's second opinion** (when `second-opinion` has run for the week):
-  Claude's own XI, drops/adds and matchup notes, each with a one-line reason,
+  Claude's own XI, drops/adds and per-fixture notes, each with a one-line reason,
   marked where it agrees with this page's picks ("Agrees on 9 of 11
   starters"). Claude sees raw data only (recent league points and minutes,
   injury news, fixtures, odds, head-to-head records), never this tool's
@@ -61,8 +64,10 @@ code layout.
 - **Fixtures** for the week, with club badges and kickoff times in your
   phone's time zone: each side's win chance from Kalshi and Polymarket odds,
   plus draw chance, expected goals, clean-sheet chances and the odds' source
-  and age underneath. With a matchup, each fixture also shows how many of your
-  starters and theirs play in it ("You 3", "Them 2");
+  and the UTC time they were fetched (`MM-DD HH:MM`, not an age) underneath;
+  a fixture with no usable odds says "no market — using FPL difficulty". With
+  a matchup for that week, a fixture also shows how many of your starters and
+  theirs play in it ("You 3", "Them 2"); a count of 0 is hidden;
 - a **This week (live)** section during a game week: starters who may not
   play, and bench swaps for starters who got 0 minutes (each player locks at
   his own kickoff, so an unused starter can still be swapped for a bench
@@ -83,12 +88,17 @@ only if it isn't "a100" or "none".
 
 Points are your league's exact scoring, computed from Sleeper's own weekly
 stats. If those are unavailable, or you set `"stats_source": "fpl"`, it falls
-back to official FPL stats mapped through `scoring_map.json`, which covers only
-part of the league's scoring; the page then shows an "Approximate" banner.
+back to official FPL stats mapped through `scoring_map.json`, which may cover only
+part of the league's scoring; the page shows an "Approximate" banner if the map
+leaves some rules without an FPL stat or lacks some league scoring keys.
 
 ## Setup
 
-Requires Python 3.10+. Standard library only; nothing to install.
+Requires Python 3.10+. The core tool uses the standard library only and needs
+no API keys. Only the optional `second-opinion` command needs anything extra:
+the `anthropic` package (`requirements.txt` pins `anthropic>=2.3,<3`) and an
+`ANTHROPIC_API_KEY` environment variable; without them that command fails with
+an `error:` and nothing else is affected.
 
 ```bash
 cp config.example.json config.json
@@ -116,6 +126,7 @@ python3 -m sleeperfpl fetch-rosters
 python3 -m sleeperfpl fetch-history --force  # first time only; takes a few minutes
 python3 -m sleeperfpl coverage               # which scoring rules FPL can't see
 python3 -m sleeperfpl fetch-markets          # betting odds (free, no API key)
+python3 -m sleeperfpl fetch-results          # once: past results for head-to-head records (optional)
 python3 -m sleeperfpl fetch-history --season 2025   # once: last season's year (2025 for the 2026 season), for backtest
 python3 -m sleeperfpl build                  # writes site/index.html and site/report.json
 ```
@@ -137,7 +148,7 @@ paths inside the config (`db_path`, `output_dir`, `scoring_map_path`,
 | `fetch-daily` | Sleeper league, users and players; FPL bootstrap (players, teams, game weeks) and fixtures. Creates `scoring_map.json` from the league's scoring only if it doesn't exist (the repo ships one for the author's league; it is never overwritten). |
 | `fetch-rosters` | Sleeper rosters and trending adds. |
 | `fetch-status` | FPL bootstrap only (injury flags, chances, news), cheap enough to run around press conferences. |
-| `fetch-history [--force]` | Sleeper weekly stats (`sleeper_stats`) plus the FPL per-match history crawl (`fpl_history`, always run regardless of `stats_source`). The Sleeper step fetches every stored-missing week up to the last finished game week and re-fetches the latest stored week on every run, so once at least one game week has finished the command is never a pure no-op (before that, it does nothing). The FPL crawl is skipped unless a new game week has finished since the last complete crawl; `--force` re-crawls. The crawl fetches every player with minutes > 0, one request per player at `fpl_request_interval`; if any player fails, the "last crawled" marker is not advanced and the next run retries. With `--season <year>` (a past season) it only fetches that season's Sleeper stats, weeks 1–38, for `backtest`; it skips the FPL crawl and doesn't change the stats week shown on the page. |
+| `fetch-history [--force] [--season YEAR]` | Sleeper weekly stats (`sleeper_stats`) plus the FPL per-match history crawl (`fpl_history`, always run regardless of `stats_source`). The Sleeper step fetches every stored-missing week up to the last finished game week and re-fetches the latest stored week on every run, so once at least one game week has finished the command is never a pure no-op (before that, it does nothing). The FPL crawl is skipped unless a new game week has finished since the last complete crawl; `--force` re-crawls. `--force` also re-fetches every Sleeper week from 1 to the last finished one. The crawl fetches every player with minutes > 0, one request per player at `fpl_request_interval`; if any player fails, the "last crawled" marker is not advanced and the next run retries. With `--season <year>` (a past season) it only fetches that season's Sleeper stats, weeks 1–38, for `backtest`; it skips the FPL crawl and doesn't change the stats week shown on the page. |
 | `fetch-results [--from SEASON] [--force]` | Past Premier League results from football-data.co.uk (one free CSV per season), from `--from` (default 2010) to last season, into `match_results`, for head-to-head records. Club names are mapped to FPL's (`results_teams` in `overrides.json` fixes the rest). Seasons already stored are skipped unless `--force`. This season's results come from the FPL fixtures instead. |
 | `coverage` | Reads only `scoring_map.json` and the stored league (no DB writes). Lists the rules, which ones FPL can and can't cover, league scoring keys missing from the map or with different points, and makes two live probes of Sleeper's stats endpoints (`api.sleeper.app` and `api.sleeper.com`; see Data sources). |
 | `fetch-markets` | Kalshi and Polymarket match odds (no player markets; those come from `matchday`). A source that fails with a fetch error (network, HTTP or bad JSON) warns, keeps the previous odds and doesn't stop the other. Any other kind of error (for example an unexpected response shape) is not caught and aborts the command with a traceback, so the second source may not run. |
@@ -145,7 +156,7 @@ paths inside the config (`db_path`, `output_dir`, `scoring_map_path`,
 | `backtest [--season S] [--json PATH] [--minutes]` | Replays finished game weeks, starting at game week 2 (game week 1 has no earlier weeks and is never scored), to compare projection methods (`v1`, a naive `season_avg` and `v1m`). Needs Sleeper stats (`fetch-history`), else it exits with an error. For week *g* it uses only each player's Sleeper stats from earlier weeks of the same season, scores every player who played in one of the 5 weeks before, and prints per week the average miss (everyone / played only) and how well each method ordered players within each position, then how many weeks each method beat `v1`. Seasons are reported separately. `--season` (repeatable) picks seasons, default all stored. `--json` also writes the full results. Past seasons have no fixture data, so `v1` runs with a neutral multiplier there and blank or double weeks are skipped. `v1m` refits the minutes model for each week on earlier weeks only (needs 1,500 rows, else the shipped default if it is from an earlier season, else that week has no v1m); the output adds the per-week difference v1m − v1 with a 95% range and a sign-flip p-value, and the "minutes error share" (v1m's miss against v1m given each player's actual minutes). `--minutes` also prints Brier scores for P(start), P(appear) and P(60+) against two baselines (last week; last 5 weeks) and a reliability table. Read-only. |
 | `fit-minutes [--force] [--export PATH]` | Refits the start model on every stored regular week and saves it (`minutes_model`); prints the rows used and a holdout Brier score on the newest season's last 4 weeks. Does nothing if no new week was stored since the last fit, unless `--force`. `--export` also writes the model as JSON (the shipped default came from a 2025-only fit). |
 | `label-audit` | Rebuilds and prints, per injury label, how many logged players had it and how often they started, played (with a 90% range) and reached 60 minutes. "Sleeper says Out, FPL says available" comes first. Empty until weeks finish after builds have logged labels. |
-| `second-opinion [--force]` | Asks Claude (Anthropic API) for its own XI, swaps and matchup notes for the target game week and saves the answer in `second_opinion_log`; `build` shows the newest one. Does nothing unless `second_opinion.enabled` is true. Runs once per game week: only when the week's first kickoff is less than `second_opinion.lead_hours` away and no answer is saved for it yet (otherwise it prints "not due" without fetching anything). When due it refreshes rosters, trending adds and FPL injury news first. `--force` asks again regardless. The answer is checked against the league's rules (legal slots, real players, droppable drops, listed free agents, at most `max_swaps`); a broken answer gets one retry with the problems listed, then the command fails and saves nothing. After 2 tries for the same game week (each is billed) it stops being due, so a run that keeps failing can't bill every hour until kickoff; `--force` still runs. Needs `ANTHROPIC_API_KEY` and the `anthropic` package. Costs about $0.30 a run on Opus. |
+| `second-opinion [--force]` | Asks Claude (Anthropic API) for its own XI, swaps and per-fixture notes for the target game week and saves the answer in `second_opinion_log`; `build` shows the newest one. Does nothing unless `second_opinion.enabled` is true. Runs once per game week: only when the week's first kickoff is less than `second_opinion.lead_hours` away and no answer is saved for it yet (otherwise it prints "not due" without fetching anything). When due it refreshes rosters, trending adds and FPL injury news first. `--force` asks again regardless. The answer is checked against the league's rules (legal slots, real players, droppable drops, listed free agents, at most `max_swaps`); a broken answer gets one retry with the problems listed, then the command fails and saves nothing. After 2 tries for the same game week (each is billed) it stops being due, so a run that keeps failing can't bill every hour until kickoff; `--force` still runs. Needs `ANTHROPIC_API_KEY` and the `anthropic` package. Costs about $0.30 a run on Opus. |
 | `build` | Writes `report.json` and `index.html` to `output_dir` (via a temp file and rename) and, when it uses Sleeper stats and there is a target game week, appends to `projection_log`, `recommendation_log` and `match_log`. When it uses Sleeper stats and a minutes model exists (a default one ships) it also rebuilds `label_counts` (a database write during a build). Prints `wrote <dir>/index.html (GW<n>, <k> swap tips)`. |
 
 Every command first opens the database, creating `data/` and all tables if
@@ -180,7 +191,7 @@ immediately.
   scored.
 - Quotes wider than `market_max_spread` or thinner than `market_min_depth` are
   ignored. Quotes older than `market_stale_hours` never drive projections; a
-  fixture with only stale odds still appears in the Matches table, tagged stale.
+  fixture with only stale odds still appears in the Fixtures card, tagged stale.
 - Market-adjusted projections need Sleeper stats. With `stats_source: "fpl"`
   (or the fallback below) every projection uses the difficulty method.
 - The in-progress game week is excluded from the recent average.
@@ -203,8 +214,11 @@ The report card needs those logs, so it is empty when stats come from FPL.
 
 ## Injury labels and expected minutes
 
-**Who counts as out.** A player is "out" (projection 0, never picked, never
-suggested) only when FPL says so: suspended (`s`), unavailable (`u`), not in
+**Who counts as out.** A player is "out" (projection 0, never suggested as an add or listed as a free agent;
+`best_xi` has no special handling for him, so on your own roster he is chosen
+only when nothing projecting higher can fill the slot, and among players who
+also project 0 the one with the higher recent average wins, so he can start
+ahead of a healthy zero-projection player) only when FPL says so: suspended (`s`), unavailable (`u`), not in
 the squad (`n`), or a 0% chance of playing. FPL status injured (`i`) with no
 chance value counts as a 0% chance, so it is out too. Sleeper's `injury_status` never
 makes a player out: Sleeper's labels are often wrong, and a player only
@@ -255,8 +269,12 @@ excludes 0, and its average order is not meaningfully worse.
 ## Configuration (`config.json`)
 
 `league_id` and `owner` are required (a missing or empty value is an error);
-everything else has a default. `config.example.json` lists every key with its
-default. Unknown keys are silently ignored. `config.json` is git-ignored.
+everything else has a default. `config.example.json` lists every key, with the
+defaults below except `schedule`: the example file holds the author's league
+opponents (game weeks 9 to 31), whereas the code default is no schedule. Replace
+it with your league's or delete the key; left as is for another league, the
+matchup card shows a "matches no team" notice in those weeks (not an error).
+Unknown keys are silently ignored. `config.json` is git-ignored.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -287,7 +305,7 @@ default. Unknown keys are silently ignored. `config.json` is git-ignored.
 | `minutes_model` | `"shadow"` | `"shadow"`: minutes estimates are logged and shown only; `"on"`: v1m/v2m drive picks |
 | `label_prior_k` | 20 | how many pseudo-players stand behind each label's starting guess before this league's outcomes take over |
 | `sleeper_label_weight` | 1.0 | 0 to 1: how much Sleeper's injury labels move the minutes estimate (0 ignores them) |
-| `schedule` | none | head-to-head opponents, which Sleeper's API doesn't provide for soccer: `{"start_gw": 9, "end_gw": 31, "opponents": ["Team A", "Team B", ...]}`. Game week `g` from `start_gw` to `end_gw` (default 38) faces `opponents[(g - start_gw) % len(opponents)]`, so the list repeats. Each name is matched to a Sleeper team name, then a username, ignoring case. Without it there is no matchup card; a name that matches no one shows a notice instead |
+| `schedule` | none | head-to-head opponents, which Sleeper's API doesn't provide for soccer: `{"start_gw": 9, "end_gw": 31, "opponents": ["Team A", "Team B", ...]}`. Game week `g` from `start_gw` to `end_gw` (default 38) faces `opponents[(g - start_gw) % len(opponents)]`, so the list repeats. Each name is matched to a Sleeper team name, then a display name, ignoring case and surrounding whitespace. Without it there is no matchup card. In place of a card you get a notice if the name matches no team (the notice lists the teams), the matched user has no roster, or the match is your own team |
 | `second_opinion` | `{"enabled": false, "model": "claude-opus-5-5", "effort": "high", "lead_hours": 48}` | Claude's second opinion. `enabled` turns the `second-opinion` command on; `effort` is one of `low`, `medium`, `high`, `xhigh`, `max`; `lead_hours` is how long before the week's first kickoff it runs. Merged per key with the defaults. The API key is never read from here: set `ANTHROPIC_API_KEY` |
 | `minutes_shrink_k` | 3 | how many 90-minute matches of the position's average stand behind each player's v1m/v2m points per 90, so a player with a few minutes doesn't get an absurd rate (0 turns it off) |
 
@@ -473,19 +491,27 @@ Details of `report.json` worth knowing:
   `brier_cs`) and `summary` (a string). `weeks`, `decisions` and `matches` keep
   the last 8 entries; `labels` is not trimmed.
 - `matchup` is `null` without a scheduled opponent this week. Otherwise it has
-  `gw`, `mode` (`"projected"` or `"live"`), `notice` (text when the schedule
-  name matched no team; then `me` and `them` are `null`), `me`, `them` and
+  `gw`, `mode` (`"projected"` or `"live"`), `notice` (text when the opponent can't be resolved: the schedule
+  name matched no team, the matched user has no roster, or it is your own team;
+  then `me` and `them` are `null`), `me`, `them` and
   `after_swaps` (your XI total after every suggested swap, projected mode only).
   Each side has `name`, `username`, `record`, `total`, `formation`, `bench`
-  (projected mode) and `starters` (`slot`, `player`, and in live mode `points`,
-  `state` — `done`, `playing`, `to_play`, or `no_match` when his club has no
-  match that week — and `kickoff` for `to_play`); live sides also have
+  (the bench in projected mode; always `[]` in live mode) and `starters`
+  (always `slot`, `player`, `points` and `state`; in projected mode `points`
+  and `state` are `null`; in live mode `state` is `done`, `playing`, `to_play`,
+  or `no_match` when his club has no match that week, and live starters also
+  have `kickoff`, `null` unless `to_play`; an empty lineup slot has
+  `player: null`); live sides also have
   `to_play`, the number of starters still to play.
-- `badges` maps each club code to its FPL badge code (`null` until the next
-  `fetch-daily`); `club_names` maps it to the full name.
+- `badges` maps each club code to its FPL badge code (`fpl_teams.code`, stored
+  by any command that fetches the FPL bootstrap: `fetch-daily`, `fetch-status`,
+  `matchday` and the `second-opinion` refresh; a value is `null` until a
+  bootstrap fetch has stored a code for that club, and then no badge image is
+  shown);
+  `club_names` maps it to the full name.
 - `matches` entries always have `fixture_id`, `home`, `away`, `kickoff`,
   `market`, `mine` and `theirs` (starters of each side in that fixture, `null`
-  when the matchup is for another week). `market` is `null` when unpriced; when priced they also have
+  when there is no resolved matchup or it is for another week). `market` is `null` when unpriced; when priced they also have
   `stale`, `sources`, `fetched_at`, `p_home`, `p_draw`, `p_away`, `lam_home`,
   `lam_away`, `cs_home`, `cs_away`.
 - Player objects carry `sleeper_id`, `name`, `positions`, `club`, `flag`, `avg`,
@@ -549,7 +575,7 @@ missing columns in place.
 | `fpl_history` | `(season, fpl_id, fixture_id)` | per-match FPL stats (`round`, `kickoff_time`, `minutes`, `stats_json`) |
 | `sleeper_stats` | `(season, week, player_id)` | Sleeper weekly stats (`stats_json`) |
 | `projection_log` | none (append-only) | every build's projections (`v1`, `v2`, `p_goal_market`, plus `position` and FPL's `ep_next`) for the report card, and the minutes estimate: `v1m`, `v2m`, `p_start`, `p_app`, `p60`, `e_min`, the labels used (`fpl_bucket`, `slp_bucket`, `label_at`), and the chances before labels (`p_start_model`, `p_app_model`) and after FPL's (`p_start_fpl`, `p_app_fpl`) |
-| `minutes_model` | `version` | fitted start models (`model_json`, `n_rows`, `trained_on` = last stored week, `holdout_brier`); the newest is used |
+| `minutes_model` | `version` | fitted start models (`model_json`, `n_rows`, `trained_on` = `"<newest season>:<last stored week>"` at fit time, used to skip refits, `holdout_brier`); the newest is used |
 | `label_counts` | `(season, kind, cell)` | per injury label: players, starts, appearances, 60+ and expected starts/appearances, rebuilt each build from `projection_log` and `sleeper_stats` |
 | `match_log` | none (append-only) | every build's fitted odds per target-week fixture (`method`, `lam_home`, `lam_away`, win/draw/away and clean-sheet chances, `n_quotes`, `avg_spread`) |
 | `recommendation_log` | none (append-only) | every build's suggested XI (`xi_json`) and swaps (`swaps_json`), with `roster_id` and the week's `first_kickoff` |
@@ -575,6 +601,7 @@ sleeperfpl/
   pricing.py         Poisson fit: quotes -> expected goals, win/draw, clean sheets
   scoring_map.py     scoring_map.json, coverage, FPL-based points
   matching.py        link Sleeper players to FPL players; overrides.json
+  matchup.py         schedule -> opponent, pitch rows, formation, live-score rows
   gameweek.py        which game week to plan for; free agents vs waivers
   projection.py      v1: recent average x fixture difficulty; v1m: the same with expected minutes
   projection_v2.py   v2: market-adjusted projection; v2m: with expected minutes
