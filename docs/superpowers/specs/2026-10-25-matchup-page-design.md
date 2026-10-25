@@ -1,7 +1,7 @@
 # Matchup Page: Design
 
 Date: 2026-10-25
-Status: draft, awaiting owner approval
+Status: approved by owner 2026-10-25
 Mockup (approved by owner 2026-10-25: "exactly what i imagined"):
 https://claude.ai/artifact/VUC4AWvBsTjf4pGva4zGf2. It is built from real GW9
 data, and the page should look and read like it.
