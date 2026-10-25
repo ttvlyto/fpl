@@ -44,13 +44,13 @@ def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
     elements = [(1, "David", "Raya", "Raya", 1, 1), (2, "Bukayo", "Saka", "Saka", 1, 3),
                 (3, "Declan", "Rice", "Rice", 1, 3), (5, "Cole", "Palmer", "Palmer", 2, 3),
                 (6, "Marc", "Cucurella", "Cucurella", 2, 2)]
-    conn.executemany("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?)",
-                     [(ts, fid, f, s, w, t, et, "a", None, 900) for fid, f, s, w, t, et in elements])
+    conn.executemany("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     [(ts, fid, f, s, w, t, et, "a", None, 900, None) for fid, f, s, w, t, et in elements])
     conn.executemany("INSERT INTO fpl_teams VALUES (?,?,?,?)", [(ts, 1, "ARS", "Arsenal"), (ts, 2, "CHE", "Chelsea")])
     conn.executemany("INSERT INTO fpl_events VALUES (?,?,?,?)", [(ts, 1, "2026-08-15T10:00:00Z", 1), (ts, 8, "2026-10-17T10:00:00Z", 1),
                                                                  (ts, 9, "2026-10-24T10:00:00Z", 0)])
-    conn.execute("INSERT INTO fpl_fixtures VALUES (?,?,?,?,?,?,?,?,?)",
-                 (ts, 50, 9, 1, 2, 4, 3, "2026-10-24T11:30:00Z", 0))
+    conn.execute("INSERT INTO fpl_fixtures VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                 (ts, 50, 9, 1, 2, 4, 3, "2026-10-24T11:30:00Z", 0, None, None))
     # goals per match: Saka 1 (5+2=7), Rice 0 (2), Palmer 2 (12), Raya 0 (2), Cucurella 0 (2)
     goals = {1: 0, 2: 1, 3: 0, 5: 2, 6: 0}
     rows = []

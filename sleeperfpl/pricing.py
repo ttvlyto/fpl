@@ -31,6 +31,7 @@ class FixtureOdds:
     sources: list = field(default_factory=list)
     fetched_at: str = ""
     n_quotes: int = 0
+    avg_spread: float | None = None   # mean ask - bid of the quotes used
 
 
 def _pmf(lam):
@@ -125,10 +126,12 @@ def fit_fixture(quotes, home, away):
         if best is None or err < best[0]:
             best = (err, lh, la, pr)
     _, lh, la, pr = best
+    spreads = [q["ask"] - q["bid"] for q in quotes if q.get("ask") is not None and q.get("bid") is not None]
     return FixtureOdds(home, away, lh, la, pr["home"], pr["draw"], pr["away"],
                        cs_home=math.exp(-la), cs_away=math.exp(-lh),
                        sources=sorted({q["source"] for q in quotes}),
-                       fetched_at=max(q["fetched_at"] for q in quotes), n_quotes=len(quotes))
+                       fetched_at=max(q["fetched_at"] for q in quotes), n_quotes=len(quotes),
+                       avg_spread=sum(spreads) / len(spreads) if spreads else None)
 
 
 def fixture_odds(quotes, fixtures, teams, cfg, now, overrides):

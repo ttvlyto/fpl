@@ -37,6 +37,11 @@ class PricingTests(unittest.TestCase):
         self.assertAlmostEqual(o.cs_home, math.exp(-0.9), delta=0.05)
         self.assertAlmostEqual(o.p_home + o.p_draw + o.p_away, 1.0, places=6)
 
+    def test_avg_spread(self):
+        qs = model_quotes(1.8, 0.9)[:2] + [{**q, "bid": q["bid"] - 0.01, "ask": q["ask"] + 0.01}
+                                            for q in model_quotes(1.8, 0.9)[2:4]]
+        self.assertAlmostEqual(fit_fixture(qs, "ARS", "HUL").avg_spread, 0.03)
+
     def test_fit_with_only_1x2(self):
         o = fit_fixture(model_quotes(2.0, 0.7)[:3], "ARS", "HUL")
         self.assertGreater(o.p_home, o.p_away)

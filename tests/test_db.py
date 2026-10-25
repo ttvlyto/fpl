@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,6 +36,27 @@ class DbTests(unittest.TestCase):
         meta_set(self.conn, "k", "v1")
         meta_set(self.conn, "k", "v2")
         self.assertEqual(meta_get(self.conn, "k"), "v2")
+
+    def test_old_database_migrated(self):
+        path = self.tmp / "old.db"
+        old = sqlite3.connect(path)
+        old.execute("CREATE TABLE fpl_elements (fetched_at, fpl_id, first_name, second_name, web_name, team_id, "
+                    "element_type, status, chance_next, total_minutes)")
+        old.execute("CREATE TABLE projection_log (made_at TEXT, season TEXT, gw INTEGER, sleeper_id TEXT, "
+                    "kickoff TEXT, v1 REAL, v2 REAL, p_goal_market REAL)")
+        old.execute("INSERT INTO projection_log VALUES ('t', '2026', 9, 'a', NULL, 4, NULL, NULL)")
+        old.commit()
+        old.close()
+        connect(path).close()
+        conn = connect(path)
+        cols = lambda t: [r[1] for r in conn.execute(f"PRAGMA table_info({t})")]
+        self.assertIn("ep_next", cols("fpl_elements"))
+        self.assertIn("position", cols("projection_log"))
+        self.assertIn("ep_next", cols("projection_log"))
+        conn.execute("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?,?)", ("t", 1, "", "", "", 1, 3, "a", None, 0, 4.5))
+        row = conn.execute("SELECT v1, position FROM projection_log").fetchone()
+        self.assertEqual((row[0], row[1]), (4, None))
+        conn.close()
 
     def test_connect_twice_is_idempotent(self):
         connect(self.tmp / "sub" / "t.db").close()

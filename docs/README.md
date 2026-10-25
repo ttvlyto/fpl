@@ -315,14 +315,15 @@ every snapshot, which is the history a future prediction model would need.
 | `sleeper_rosters` | `roster_id`, `owner_id`, `players_json`, `starters_json`, `reserve_json` |
 | `sleeper_users` | `user_id`, `display_name` |
 | `sleeper_trending` | `direction`, `player_id`, `count` |
-| `fpl_elements` | `fpl_id`, `first_name`, `second_name`, `web_name`, `team_id`, `element_type`, `status`, `chance_next`, `total_minutes` |
+| `fpl_elements` | `fpl_id`, `first_name`, `second_name`, `web_name`, `team_id`, `element_type`, `status`, `chance_next`, `total_minutes`, `ep_next` (FPL's own expected points) |
 | `fpl_teams` | `team_id`, `short_name`, `name` |
 | `fpl_events` | `event_id`, `deadline_time`, `finished` |
-| `fpl_fixtures` | `fixture_id`, `event`, `team_h`, `team_a`, `team_h_difficulty`, `team_a_difficulty`, `kickoff_time`, `finished` |
+| `fpl_fixtures` | `fixture_id`, `event`, `team_h`, `team_a`, `team_h_difficulty`, `team_a_difficulty`, `kickoff_time`, `finished`, `team_h_score`, `team_a_score` |
 | `market_quotes` | `source`, `home`, `away`, `kickoff`, `market` (`1x2`/`total`/`team_total`/`btts`), `line`, `side`, `bid`, `ask`, `depth`, `ref` |
 | `player_quotes` | `source`, `home`, `away`, `kickoff`, `player`, `team`, `market` (`goal1`/`goal2`/`soa`), `bid`, `ask`, `last`, `depth`, `ref` |
 
-All snapshot tables also have `fetched_at`.
+All snapshot tables also have `fetched_at`. Opening an older database adds any
+missing columns in place.
 
 **Other tables:**
 
@@ -330,7 +331,9 @@ All snapshot tables also have `fetched_at`.
 |---|---|---|
 | `fpl_history` | `(season, fpl_id, fixture_id)` | per-match FPL stats (`round`, `kickoff_time`, `minutes`, `stats_json`) |
 | `sleeper_stats` | `(season, week, player_id)` | Sleeper weekly stats (`stats_json`) |
-| `projection_log` | none (append-only) | every build's projections (`v1`, `v2`, `p_goal_market`) for the report card |
+| `projection_log` | none (append-only) | every build's projections (`v1`, `v2`, `p_goal_market`, plus `position` and FPL's `ep_next`) for the report card |
+| `match_log` | none (append-only) | every build's fitted odds per target-week fixture (`method`, `lam_home`, `lam_away`, win/draw/away and clean-sheet chances, `n_quotes`, `avg_spread`) |
+| `recommendation_log` | none (append-only) | every build's suggested XI (`xi_json`) and swaps (`swaps_json`), with `roster_id` and the week's `first_kickoff` |
 | `meta` | `key` | small key/value state |
 
 ## Code layout

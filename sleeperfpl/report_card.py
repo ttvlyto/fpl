@@ -14,14 +14,14 @@ def log_projections(conn, season, gw, players, made_at):
              pl.proj_v1, pl.proj if pl.proj_source == "market" else None, pl.p_goal_market)
             for pl in players if pl.fpl_id is not None]
     with conn:
-        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)", rows)
     return len(rows)
 
 
 def log_goal_odds(conn, season, gw, rows, made_at):
     """Match-day player goal odds (no projection): rows of (sleeper_id, kickoff, p_goal)."""
     with conn:
-        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)",
+        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL)",
                          [(made_at, season, gw, sid, kickoff, p) for sid, kickoff, p in rows])
     return len(rows)
 

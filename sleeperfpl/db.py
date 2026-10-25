@@ -15,11 +15,11 @@ SNAPSHOT_TABLES = {
     "sleeper_users": "fetched_at, user_id, display_name",
     "sleeper_trending": "fetched_at, direction, player_id, count",
     "fpl_elements": ("fetched_at, fpl_id, first_name, second_name, web_name, team_id, "
-                     "element_type, status, chance_next, total_minutes"),
+                     "element_type, status, chance_next, total_minutes, ep_next"),
     "fpl_teams": "fetched_at, team_id, short_name, name",
     "fpl_events": "fetched_at, event_id, deadline_time, finished",
     "fpl_fixtures": ("fetched_at, fixture_id, event, team_h, team_a, team_h_difficulty, "
-                     "team_a_difficulty, kickoff_time, finished"),
+                     "team_a_difficulty, kickoff_time, finished, team_h_score, team_a_score"),
     # Betting markets. market: 1x2 | total | team_total | btts; side: team code, draw, over or yes.
     "market_quotes": "fetched_at, source, home, away, kickoff, market, line, side, bid, ask, depth, ref",
     # Player markets: goal1 | goal2 | soa.
@@ -37,15 +37,25 @@ CREATE TABLE IF NOT EXISTS sleeper_stats (
     season TEXT, week INTEGER, player_id TEXT, stats_json TEXT, fetched_at TEXT,
     PRIMARY KEY (season, week, player_id)
 );
--- Every build's projections, for the weekly report card (append-only).
-CREATE TABLE IF NOT EXISTS projection_log (
-    made_at TEXT, season TEXT, gw INTEGER, sleeper_id TEXT, kickoff TEXT,
-    v1 REAL, v2 REAL, p_goal_market REAL
-);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
-TABLES = set(SNAPSHOT_TABLES) | {"fpl_history", "sleeper_stats", "projection_log", "meta"}
+# Append-only logs for the report card. Columns are only ever added at the end,
+# so `connect` can migrate an existing database in place.
+LOG_TABLES = {
+    # Every build's projections.
+    "projection_log": ("made_at TEXT, season TEXT, gw INTEGER, sleeper_id TEXT, kickoff TEXT, "
+                       "v1 REAL, v2 REAL, p_goal_market REAL, position TEXT, ep_next REAL"),
+    # Every build's fitted match odds; method: market (later blend or rating).
+    "match_log": ("made_at TEXT, season TEXT, gw INTEGER, fixture_id INTEGER, kickoff TEXT, method TEXT, "
+                  "lam_home REAL, lam_away REAL, p_home REAL, p_draw REAL, p_away REAL, "
+                  "cs_home REAL, cs_away REAL, n_quotes INTEGER, avg_spread REAL"),
+    # Every build's suggested XI (sleeper ids) and swaps ([drop_id, add_id]).
+    "recommendation_log": ("made_at TEXT, season TEXT, gw INTEGER, first_kickoff TEXT, roster_id INTEGER, "
+                           "xi_json TEXT, swaps_json TEXT"),
+}
+
+TABLES = set(SNAPSHOT_TABLES) | set(LOG_TABLES) | {"fpl_history", "sleeper_stats", "meta"}
 
 
 def now_iso():
@@ -59,9 +69,23 @@ def connect(path):
     conn.row_factory = sqlite3.Row
     for table, cols in SNAPSHOT_TABLES.items():
         conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({cols})")
+        _add_missing_columns(conn, table, cols)
         conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_fetched ON {table}(fetched_at)")
+    for table, cols in LOG_TABLES.items():
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {table} ({cols})")
+        _add_missing_columns(conn, table, cols)
     conn.executescript(OTHER_SCHEMA)
     return conn
+
+
+def _add_missing_columns(conn, table, cols):
+    """Older databases lack columns added since: append them."""
+    have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for col in cols.split(","):
+        col = col.strip()
+        if col.split()[0] not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+    conn.commit()
 
 
 def _check(table):

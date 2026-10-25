@@ -11,16 +11,24 @@ FPL = "https://fantasy.premierleague.com/api"
 HISTORY_META = "history_last_gw"
 
 
+def _float(value):
+    """FPL sends expected points as strings ("4.5")."""
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_bootstrap(conn, get=get_json):
     """Snapshot elements (players), teams and events (game weeks)."""
     data = get(f"{FPL}/bootstrap-static/")
     ts = now_iso()
     with conn:
         conn.executemany(
-            "INSERT INTO fpl_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO fpl_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(ts, e["id"], e.get("first_name"), e.get("second_name"), e.get("web_name"),
               e.get("team"), e.get("element_type"), e.get("status"),
-              e.get("chance_of_playing_next_round"), e.get("minutes") or 0)
+              e.get("chance_of_playing_next_round"), e.get("minutes") or 0, _float(e.get("ep_next")))
              for e in data.get("elements", [])],
         )
         conn.executemany(
@@ -40,10 +48,10 @@ def fetch_fixtures(conn, get=get_json):
     ts = now_iso()
     with conn:
         conn.executemany(
-            "INSERT INTO fpl_fixtures VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO fpl_fixtures VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(ts, f["id"], f.get("event"), f.get("team_h"), f.get("team_a"),
               f.get("team_h_difficulty"), f.get("team_a_difficulty"), f.get("kickoff_time"),
-              int(bool(f.get("finished"))))
+              int(bool(f.get("finished"))), f.get("team_h_score"), f.get("team_a_score"))
              for f in fixtures],
         )
     return len(fixtures)

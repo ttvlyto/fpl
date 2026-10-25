@@ -52,6 +52,22 @@ class FetchFplTests(unittest.TestCase):
         self.assertEqual(len(latest(self.conn, "fpl_events")), 11)
         self.assertEqual(len(latest(self.conn, "fpl_elements")), 2)
 
+    def test_bootstrap_stores_ep_next(self):
+        data = bootstrap()
+        data["elements"][0]["ep_next"] = "4.5"
+        fetch_bootstrap(self.conn, get=Recorder({"bootstrap-static/": data}))
+        got = {r["fpl_id"]: r["ep_next"] for r in latest(self.conn, "fpl_elements")}
+        self.assertEqual(got, {1: 4.5, 2: None})
+
+    def test_fixtures_store_scores(self):
+        fetch_fixtures(self.conn, get=Recorder({"fixtures/": [
+            {"id": 5, "event": 9, "team_h": 1, "team_a": 2, "team_h_difficulty": 2, "team_a_difficulty": 4,
+             "kickoff_time": "2026-10-18T14:00:00Z", "finished": True, "team_h_score": 2, "team_a_score": 0},
+            {"id": 6, "event": 10, "team_h": 1, "team_a": 2, "team_h_difficulty": 2, "team_a_difficulty": 4,
+             "kickoff_time": "2026-10-25T14:00:00Z", "finished": False, "team_h_score": None, "team_a_score": None}]}))
+        got = {r["fixture_id"]: (r["team_h_score"], r["team_a_score"]) for r in latest(self.conn, "fpl_fixtures")}
+        self.assertEqual(got, {5: (2, 0), 6: (None, None)})
+
     def test_fixtures_stored(self):
         n = fetch_fixtures(self.conn, get=Recorder({"fixtures/": [
             {"id": 5, "event": 10, "team_h": 1, "team_a": 2, "team_h_difficulty": 2,
