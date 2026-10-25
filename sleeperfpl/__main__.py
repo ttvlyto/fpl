@@ -12,6 +12,8 @@ from .db import connect, latest
 from .fetch_fpl import fetch_bootstrap, fetch_fixtures, fetch_history
 from .fetch_markets import fetch_kalshi, fetch_polymarket
 from .gameweek import live_gameweek, matchday_due
+from .minutes import regular_weeks, season_rows
+from .minutes_fit import fit_model, holdout_brier, last_fit_key, pos_of_players, save_model, training_rows
 from .fetch_sleeper import fetch_league, fetch_players, fetch_rosters, fetch_trending
 from .http import FetchError
 from .report import BuildError, build_report, write_outputs
@@ -140,6 +142,40 @@ def cmd_backtest(cfg, conn, args):
         print(f"wrote {args.json}")
 
 
+HOLDOUT_WEEKS = 4
+
+
+def cmd_fit_minutes(cfg, conn, args):
+    seasons = [r[0] for r in conn.execute("SELECT DISTINCT season FROM sleeper_stats ORDER BY season")]
+    if not seasons:
+        raise BuildError("no Sleeper stats yet; run fetch-history first")
+    newest = seasons[-1]
+    last_week = conn.execute("SELECT MAX(week) FROM sleeper_stats WHERE season = ?", (newest,)).fetchone()[0]
+    key = f"{newest}:{last_week}"
+    if not args.force and last_fit_key(conn) == key:
+        print("fit-minutes: no new weeks since last fit")
+        return
+    pos_of = pos_of_players(conn, {s: season_rows(conn, s) for s in seasons})
+    holdout = None
+    weeks = sorted(regular_weeks(season_rows(conn, newest)))
+    if len(weeks) > HOLDOUT_WEEKS:
+        cut = weeks[-HOLDOUT_WEEKS]
+        early = fit_model(conn, pos_of, seasons, before=(newest, cut))
+        test = [r for r in training_rows(conn, pos_of, [newest]) if r.week >= cut]
+        if early and test:
+            holdout = holdout_brier(early, test)
+    model = fit_model(conn, pos_of, seasons)
+    if model is None:
+        raise BuildError("not enough stored weeks to fit the minutes model")
+    save_model(conn, model, key, holdout)
+    shown = "–" if holdout is None else f"{holdout:.3f}"
+    print(f"fit-minutes: {model.n_rows} rows from {', '.join(model.trained_on)}; "
+          f"holdout Brier (start) {shown}; version {model.version}")
+    if args.export:
+        Path(args.export).write_text(json.dumps(model.to_dict(), indent=1))
+        print(f"wrote {args.export}")
+
+
 COMMANDS = {
     "fetch-daily": (cmd_fetch_daily, "league, players, FPL bootstrap + fixtures"),
     "fetch-rosters": (cmd_fetch_rosters, "rosters + trending adds"),
@@ -150,6 +186,7 @@ COMMANDS = {
     "matchday": (cmd_matchday, "before kickoffs / after matches: odds, player markets, live stats, rebuild"),
     "build": (cmd_build, "write report.json and index.html"),
     "backtest": (cmd_backtest, "replay past weeks to compare projection methods"),
+    "fit-minutes": (cmd_fit_minutes, "refit the start/minutes model from stored Sleeper weeks"),
 }
 
 
@@ -164,6 +201,9 @@ def main(argv=None):
         if name == "backtest":
             p.add_argument("--season", action="append", help="season to replay (repeatable; default: all stored)")
             p.add_argument("--json", help="also write the full results to this file")
+        if name == "fit-minutes":
+            p.add_argument("--force", action="store_true", help="refit even if no new week is stored")
+            p.add_argument("--export", help="also write the fitted model to this JSON file")
         if name == "fetch-history":
             p.add_argument("--force", action="store_true", help="refetch even if no new game week finished")
             p.add_argument("--season", help="fetch a past season's Sleeper stats (e.g. 2025), for backtest")
