@@ -20,7 +20,7 @@ from .gameweek import MATCH_LENGTH, live_gameweek, matches_left, season_of, targ
 from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
-from .matchup import find_opponent, formation, opponent_for, record_text, team_label
+from .matchup import find_opponent, formation, live_side, opponent_for, record_text, team_label
 from .live import unlikely_to_play, zero_minute_replacements
 from .markets import find_fixture, latest_quotes, mid, team_code, usable
 from .minutes import fixture_minutes, history, last_season_start_share, player_minutes, regular_weeks, season_rows
@@ -199,7 +199,9 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     my_ids, reserve = set(mine["players"]), set(mine["reserve"])
     # This week's head-to-head opponent: projected like the owner's roster, but kept in opp_ctx so
     # none of their players ever reach free agents, swaps, the logs or the second opinion.
-    matchup_gw = gw.gw
+    # While a week with a scheduled opponent is being played, the card shows that week's live score.
+    live_matchup = bool(playing and opponent_for(cfg.schedule, playing))
+    matchup_gw = playing if live_matchup else gw.gw
     opp_name = opponent_for(cfg.schedule, matchup_gw)
     opp_roster, opp_notice = (find_opponent(opp_name, users, rosters, mine["roster_id"]) if opp_name
                               else (None, None))
@@ -286,8 +288,15 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
     matches = [_match_entry(f, teams, fodds.get(f["fixture_id"]) or all_odds.get(f["fixture_id"]),
                             f["fixture_id"] not in fodds) for f in target]
+    live_inputs = None
+    if live_matchup and opp_roster:
+        live_inputs = {"states": _club_states(conn, sleeper_season, matchup_gw, fixtures, teams, now, club_of),
+                       "stats": {pid: json.loads(raw) for pid, raw in conn.execute(
+                           "SELECT player_id, stats_json FROM sleeper_stats WHERE season = ? AND week = ?",
+                           (sleeper_season, matchup_gw))},
+                       "scoring": scoring, "players": {p["player_id"]: p for p in players}}
     matchup = _matchup_block(matchup_gw, opp_name, opp_roster, opp_notice, users, mine, roster, opp_ctx,
-                             lineup, swaps, slots, cfg)
+                             lineup, swaps, slots, cfg, ctx, live_inputs)
     counted = matchup if matchup and matchup["them"] and matchup["gw"] == gw.gw else None
     for m in matches:
         m["mine"], m["theirs"] = ((_count_in(counted["me"], m), _count_in(counted["them"], m)) if counted
@@ -349,14 +358,48 @@ def _side(user, roster, lineup):
             "bench": [_player_dict(pl) for pl in lineup.bench]}
 
 
-def _matchup_block(gw, opp_name, opp_roster, notice, users, mine, roster, opp_ctx, lineup, swaps, slots, cfg):
-    """Both sides of this week's head-to-head (None without a scheduled opponent)."""
+def _set_lineup(ids, slots, lookup, players):
+    """[(slot, player or None)] for a lineup as set in Sleeper ("0" or a missing id = empty slot)."""
+    ids = list(ids) + [None] * (len(slots) - len(ids))
+    out = []
+    for slot, sid in zip(slots, ids):
+        if not sid or sid == "0":
+            out.append((slot, None))
+            continue
+        sp = players.get(sid) or {}
+        out.append((slot, lookup.get(sid) or PlayerCtx(
+            sleeper_id=sid, name=sp.get("name") or f"Sleeper player {sid}", positions=sp.get("positions") or [],
+            club="", fpl_id=None, flag="no data")))
+    return out
+
+
+def _live_side_dict(user, roster, starters, live):
+    rows, total, to_play = live_side(starters, live["stats"], live["scoring"], live["states"])
+    return {"name": team_label(user), "username": user.get("display_name"), "record": record_text(roster),
+            "total": round(total, 1), "to_play": to_play,
+            "formation": formation([r["pl"].positions for r in rows if r["pl"]]),
+            "starters": [{"slot": r["slot"], "player": _player_dict(r["pl"]) if r["pl"] else None,
+                          "points": round(r["points"], 1), "state": r["state"]} for r in rows],
+            "bench": []}
+
+
+def _matchup_block(gw, opp_name, opp_roster, notice, users, mine, roster, opp_ctx, lineup, swaps, slots, cfg,
+                   ctx=None, live=None):
+    """Both sides of this week's head-to-head (None without a scheduled opponent): strongest XIs and
+    projections between weeks, or (with `live`) the lineups as set and points so far while it's played."""
     if not opp_name:
         return None
-    block = {"gw": gw, "mode": "projected", "notice": notice, "me": None, "them": None, "after_swaps": None}
+    block = {"gw": gw, "mode": "live" if live else "projected", "notice": notice, "me": None, "them": None,
+             "after_swaps": None}
     if opp_roster is None:
         return block
     user_of = {u["user_id"]: u for u in users}
+    if live:
+        block["me"] = _live_side_dict(user_of.get(mine["owner_id"], {}), mine,
+                                      _set_lineup(mine["starters"], slots, ctx or {}, live["players"]), live)
+        block["them"] = _live_side_dict(user_of.get(opp_roster["owner_id"], {}), opp_roster,
+                                        _set_lineup(opp_roster["starters"], slots, opp_ctx, live["players"]), live)
+        return block
     their_xi = best_xi(list(opp_ctx.values()), slots, cfg.slot_eligibility)
     block["me"] = _side(user_of.get(mine["owner_id"], {}), mine, lineup)
     block["them"] = _side(user_of.get(opp_roster["owner_id"], {}), opp_roster, their_xi)
@@ -525,15 +568,13 @@ def _club_minutes_in(minutes, club_of):
     return {club: (played.get(club, 0), n) for club, n in size.items()}
 
 
-def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
-                players_by_id, sleeper_season, fodds, club_of, goal_quotes, log=True):
-    gw = live_gameweek(events, fixtures, now)
-    if gw is None:
-        return None
+def _club_sets(conn, season, gw, fixtures, teams, now, club_of):
+    """(started, finished, upcoming, minutes) for game week `gw`: clubs whose match has kicked off,
+    clubs whose match is over with its stats in, clubs still to kick off, and each player's minutes."""
     # Minutes are only known once Sleeper's stats for this week were fetched after the match ended;
     # a player missing from earlier stats is "unknown", never "0 minutes".
     stats_at = parse_time(conn.execute("SELECT MAX(fetched_at) FROM sleeper_stats WHERE season = ? AND week = ?",
-                                       (sleeper_season, gw)).fetchone()[0])
+                                       (season, gw)).fetchone()[0])
     started, finished_any, in_progress = set(), set(), set()
     live_fx = [f for f in fixtures if f.get("event") == gw]
     for f in live_fx:
@@ -551,7 +592,7 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
                 in_progress.add(code)
     minutes = {}
     for pid, raw in conn.execute("SELECT player_id, stats_json FROM sleeper_stats WHERE season = ? AND week = ?",
-                                 (sleeper_season, gw)):
+                                 (season, gw)):
         minutes[pid] = json.loads(raw).get("min") or 0
     # Trust a club's minutes only once its players actually show up in the stats
     # (Sleeper can lag, and a delayed kickoff looks like a finished match).
@@ -563,6 +604,23 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
         k = parse_time(f.get("kickoff_time"))
         if k and k > now:
             upcoming |= {teams.get(f["team_h"]), teams.get(f["team_a"])}
+    return started, finished, upcoming, minutes
+
+
+def _club_states(conn, season, gw, fixtures, teams, now, club_of):
+    """club -> "done" | "playing" | "to_play" for every club with a match in game week `gw`."""
+    started, finished, _, _ = _club_sets(conn, season, gw, fixtures, teams, now, club_of)
+    clubs = {teams.get(f[side]) for f in fixtures if f.get("event") == gw for side in ("team_h", "team_a")}
+    return {c: "done" if c in finished else "playing" if c in started else "to_play" for c in clubs if c}
+
+
+def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
+                players_by_id, sleeper_season, fodds, club_of, goal_quotes, log=True):
+    gw = live_gameweek(events, fixtures, now)
+    if gw is None:
+        return None
+    started, finished, upcoming, minutes = _club_sets(conn, sleeper_season, gw, fixtures, teams, now, club_of)
+    live_fx = [f for f in fixtures if f.get("event") == gw]
 
     starter_ids = list(mine.get("starters") or [])
     starters = [(slot, ctx.get(sid)) for slot, sid in zip(slots, starter_ids)]

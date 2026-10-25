@@ -697,6 +697,45 @@ class LiveReportTests(unittest.TestCase):
         self.assertEqual(build_report(self.conn, self.cfg, after)["live"]["replacements"], [])
 
 
+class LiveMatchupTests(LiveReportTests):
+    AFTER = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
+
+    def setUp(self):
+        super().setUp()
+        self.conn.execute("UPDATE sleeper_users SET team_name = 'Rivals FC' WHERE user_id = 'u2'")
+        self.conn.execute("UPDATE sleeper_rosters SET players_json = ?, starters_json = ? WHERE roster_id = 2",
+                          (json.dumps(["s5", "s6"]), json.dumps(["s6", "s5", "0"])))
+        self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, 's5', ?, '2026-10-24T14:30:00Z')",
+                          (json.dumps({"min": 90, "pos_m_g": 1}),))
+        self.cfg.schedule = {"start_gw": 9, "end_gw": 31, "opponents": ["Rivals FC"]}
+
+    def test_live_week_shows_set_lineups_and_points(self):
+        m = build_report(self.conn, self.cfg, self.AFTER)["matchup"]
+        self.assertEqual((m["gw"], m["mode"], m["after_swaps"]), (9, "live", None))
+        self.assertEqual([s["player"]["sleeper_id"] for s in m["me"]["starters"]], ["s1", "s2", "s3"])
+        them = m["them"]["starters"]
+        self.assertEqual([s["player"] and s["player"]["sleeper_id"] for s in them], ["s6", "s5", None])
+        self.assertEqual([s["points"] for s in them], [0.0, 9.0, 0.0])
+        self.assertEqual(m["them"]["total"], 9.0)
+        self.assertEqual(m["me"]["total"], round(sum(s["points"] for s in m["me"]["starters"]), 1))
+        self.assertEqual(m["them"]["to_play"], 0)
+        self.assertEqual(m["them"]["bench"], [])
+
+    def test_live_week_without_scheduled_opponent_falls_back(self):
+        self.cfg.schedule = {"start_gw": 10, "end_gw": 31, "opponents": ["Rivals FC"]}
+        r = build_report(self.conn, self.cfg, self.AFTER)
+        self.assertTrue(r["matchup"] is None or r["matchup"]["mode"] == "projected")
+        if r["matchup"]:
+            self.assertEqual(r["matchup"]["gw"], r["gameweek"])
+
+    def test_odd_starter_ids(self):
+        self.conn.execute("UPDATE sleeper_rosters SET starters_json = ? WHERE roster_id = 2", (json.dumps(["0", "s99"]),))
+        them = build_report(self.conn, self.cfg, self.AFTER)["matchup"]["them"]["starters"]
+        self.assertIsNone(them[0]["player"])
+        self.assertEqual((them[1]["player"]["name"], them[1]["points"]), ("Sleeper player s99", 0.0))
+        self.assertIsNone(them[2]["player"])
+
+
 class ReviewFixReportMarketTests(MarketReportTests):
     def test_goal_quote_for_other_fixture_not_attached(self):
         self.quotes()

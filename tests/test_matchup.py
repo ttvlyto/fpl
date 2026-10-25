@@ -1,6 +1,9 @@
 import unittest
 
-from sleeperfpl.matchup import find_opponent, formation, opponent_for, pitch_row, record_text, team_label
+from types import SimpleNamespace
+
+from sleeperfpl.matchup import (find_opponent, formation, live_side, opponent_for, pitch_row, record_text,
+                                 team_label)
 
 S = {"start_gw": 9, "end_gw": 31, "opponents": ["A", "B", "C", "D", "E"]}
 USERS = [{"user_id": "u1", "display_name": "ttvlyto", "team_name": "noSHOWdegaard"},
@@ -52,6 +55,23 @@ class DisplayTests(unittest.TestCase):
         self.assertEqual(record_text({"wins": 4, "losses": 3, "ties": 1}), "4–3–1")
         self.assertEqual(record_text({"wins": None}), "–")
         self.assertEqual(record_text({}), "–")
+
+
+class LiveSideTests(unittest.TestCase):
+    def test_live_side_points_and_states(self):
+        done = SimpleNamespace(sleeper_id="a", club="ARS")
+        later = SimpleNamespace(sleeper_id="b", club="CHE")
+        playing = SimpleNamespace(sleeper_id="c", club="LIV")
+        rows, total, to_play = live_side([("M", done), ("M", later), ("F", playing), ("GK", None)],
+                                         {"a": {"pos_m_g": 1}, "b": {"pos_m_g": 1}, "c": {"pos_m_g": 2}},
+                                         {"pos_m_g": 9}, {"ARS": "done", "CHE": "to_play", "LIV": "playing"})
+        self.assertEqual([(r["points"], r["state"]) for r in rows],
+                         [(9.0, "done"), (0.0, "to_play"), (18.0, "playing"), (0.0, None)])
+        self.assertEqual((total, to_play), (27.0, 1))
+
+    def test_unknown_club_is_to_play(self):
+        rows, total, to_play = live_side([("M", SimpleNamespace(sleeper_id="x", club=""))], {}, {}, {})
+        self.assertEqual((rows[0]["state"], total, to_play), ("to_play", 0.0, 1))
 
 
 if __name__ == "__main__":
