@@ -23,9 +23,10 @@ def _stored_weeks(conn, season):
     return {r[0] for r in conn.execute("SELECT DISTINCT week FROM sleeper_stats WHERE season = ?", (season,))}
 
 
-def fetch_sleeper_stats(conn, sport, season, last_week, *, force=False, get=get_json):
+def fetch_sleeper_stats(conn, sport, season, last_week, *, force=False, get=get_json, update_meta=True):
     """Fetch finished weeks not stored yet, plus the latest stored week again
-    (Sleeper corrects stats after matches). Returns how many weeks were fetched."""
+    (Sleeper corrects stats after matches). Returns how many weeks were fetched.
+    `update_meta=False` (past-season backfill) leaves the live "stats week" alone."""
     if not last_week:
         return 0
     stored = _stored_weeks(conn, season)
@@ -51,7 +52,7 @@ def fetch_sleeper_stats(conn, sport, season, last_week, *, force=False, get=get_
                               for pid, stats in data.items() if isinstance(stats, dict)])
         fetched += 1
     stored = _stored_weeks(conn, season)
-    if stored:
+    if stored and update_meta:
         meta_set(conn, META, str(max(stored)))
     return fetched
 

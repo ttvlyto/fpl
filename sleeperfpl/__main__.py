@@ -40,8 +40,20 @@ def cmd_fetch_rosters(cfg, conn, args):
     print(f"trending: {fetch_trending(conn, _league(conn)['sport'])}")
 
 
+PAST_SEASON_WEEKS = 38
+
+
 def cmd_fetch_history(cfg, conn, args):
     league = _league(conn)
+    season = getattr(args, "season", None)
+    if season:
+        # A past season, once, for the backtest: Sleeper stats only (FPL serves only the current season).
+        if season == str(league.get("season", "")):
+            raise BuildError("--season is for past seasons; run fetch-history without it")
+        weeks = fetch_sleeper_stats(conn, league["sport"], season, PAST_SEASON_WEEKS, force=args.force,
+                                    update_meta=False)
+        print(f"sleeper stats {season}: {weeks} week(s) fetched")
+        return
     finished = [r["event_id"] for r in latest(conn, "fpl_events") if r["finished"]]
     weeks = fetch_sleeper_stats(conn, league["sport"], str(league.get("season", "")),
                                 max(finished) if finished else None, force=args.force)
@@ -131,6 +143,7 @@ def main(argv=None):
             p.add_argument("--force", action="store_true", help="run even if no match is near")
         if name == "fetch-history":
             p.add_argument("--force", action="store_true", help="refetch even if no new game week finished")
+            p.add_argument("--season", help="fetch a past season's Sleeper stats (e.g. 2025), for backtest")
     args = ap.parse_args(argv)
 
     try:

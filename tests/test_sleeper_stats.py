@@ -66,3 +66,40 @@ class MaxWeekTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackfillTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = connect(":memory:")
+
+    def test_backfill_leaves_meta(self):
+        from sleeperfpl.db import meta_set
+        meta_set(self.conn, "sleeper_stats_week", "8")
+        get = getter({1: {"p1": {"min": 90}}, 2: {"p1": {"min": 45}}})
+        self.assertEqual(fetch_sleeper_stats(self.conn, "s", "2025", 2, update_meta=False, get=get), 2)
+        n = self.conn.execute("SELECT COUNT(DISTINCT week) FROM sleeper_stats WHERE season = '2025'").fetchone()[0]
+        self.assertEqual(n, 2)
+        self.assertEqual(meta_get(self.conn, "sleeper_stats_week"), "8")
+
+    def _league(self, season="2026"):
+        self.conn.execute("INSERT INTO sleeper_league VALUES ('t', 'L1', ?)",
+                          (json.dumps({"sport": "s", "season": season}),))
+
+    def test_cli_season_skips_fpl(self):
+        from unittest import mock
+        import sleeperfpl.__main__ as cli
+        self._league()
+        stats, fpl = mock.Mock(return_value=38), mock.Mock()
+        with mock.patch.object(cli, "fetch_sleeper_stats", stats), mock.patch.object(cli, "fetch_history", fpl):
+            cli.cmd_fetch_history(mock.Mock(), self.conn, mock.Mock(force=False, season="2025"))
+        fpl.assert_not_called()
+        args, kwargs = stats.call_args
+        self.assertEqual((args[2], args[3], kwargs.get("update_meta")), ("2025", 38, False))
+
+    def test_cli_current_season_rejected(self):
+        from unittest import mock
+        import sleeperfpl.__main__ as cli
+        from sleeperfpl.report import BuildError
+        self._league()
+        with self.assertRaisesRegex(BuildError, "--season is for past seasons"):
+            cli.cmd_fetch_history(mock.Mock(), self.conn, mock.Mock(force=False, season="2026"))
