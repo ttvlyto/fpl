@@ -2,8 +2,11 @@ import json
 import unittest
 
 from sleeperfpl.db import connect
+from sleeperfpl.lineup import Lineup, Swap
 from sleeperfpl.models import Fixture, PlayerCtx
-from sleeperfpl.report_card import log_goal_odds, log_projections, score_weeks, summary
+from sleeperfpl.pricing import FixtureOdds
+from sleeperfpl.report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_weeks,
+                                    summary)
 
 SC = {"pos_m_g": 5}
 KO = "2026-10-24T14:00:00Z"
@@ -62,6 +65,37 @@ class ReportCardTests(unittest.TestCase):
         weeks = [{"gw": 8, "mae_v1": 3.0, "mae_v2": 2.0, "n_v2": 5}, {"gw": 9, "mae_v1": 2.0, "mae_v2": 2.5, "n_v2": 5}]
         self.assertEqual(summary(weeks), "v2 (market) beat v1 (difficulty) in 1 of 2 weeks")
         self.assertEqual(summary(weeks[:1]), "not enough weeks yet")
+
+
+class LoggingTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = connect(":memory:")
+
+    def test_log_projections_position_and_ep_next(self):
+        p = pl("a", 4)
+        p.ep_next = 3.5
+        log_projections(self.conn, "2026", 9, [p], "2026-10-23T10:00:00Z")
+        row = self.conn.execute("SELECT position, ep_next FROM projection_log").fetchone()
+        self.assertEqual((row[0], row[1]), ("MID", 3.5))
+
+    def test_log_recommendation(self):
+        lineup = Lineup([("M", pl("a", 4)), ("M", None)], [], 4.0, ["M"])
+        swaps = [Swap(pl("b", 1), pl("c", 5), 4.0, "xi")]
+        log_recommendation(self.conn, "2026", 9, KO, 3, lineup, swaps, "2026-10-23T10:00:00Z")
+        row = self.conn.execute("SELECT first_kickoff, roster_id, xi_json, swaps_json FROM recommendation_log").fetchone()
+        self.assertEqual((row[0], row[1]), (KO, 3))
+        self.assertEqual(json.loads(row[2]), ["a"])
+        self.assertEqual(json.loads(row[3]), [["b", "c"]])
+
+    def test_log_matches_target_week_only(self):
+        odds = FixtureOdds("ARS", "CHE", 1.8, 1.0, 0.5, 0.3, 0.2, 0.37, 0.17, n_quotes=4, avg_spread=0.02)
+        fodds = {50: odds, 51: odds}
+        fixtures = [{"fixture_id": 50, "event": 9, "kickoff_time": KO},
+                    {"fixture_id": 51, "event": 10, "kickoff_time": "2026-10-31T14:00:00Z"}]
+        self.assertEqual(log_matches(self.conn, "2026", 9, fodds, fixtures, "2026-10-23T10:00:00Z"), 1)
+        row = self.conn.execute("SELECT fixture_id, kickoff, method, lam_home, cs_away, n_quotes, avg_spread "
+                                "FROM match_log").fetchone()
+        self.assertEqual(tuple(row), (50, KO, "market", 1.8, 0.17, 4, 0.02))
 
 
 class PairedComparisonTests(unittest.TestCase):

@@ -34,6 +34,7 @@ class PlayerCtx:
     market_flags: list = field(default_factory=list)  # "cs" / "goal": history and market disagree
     p_goal_market: float | None = None
     p_goal_hist: float | None = None
+    ep_next: float | None = None   # FPL's own expected points (FPL scoring), a free baseline
 
     def value(self) -> float:
         """Blend of recent output and projection, used for bench comparisons."""

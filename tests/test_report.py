@@ -348,6 +348,8 @@ class MarketReportTests(unittest.TestCase):
         build_report(self.conn, self.cfg, NOW)
         n = self.conn.execute("SELECT COUNT(*) FROM projection_log WHERE gw = 9 AND v2 IS NOT NULL").fetchone()[0]
         self.assertGreater(n, 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM recommendation_log").fetchone()[0], 1)
+        self.assertEqual([r[0] for r in self.conn.execute("SELECT fixture_id FROM match_log")], [50])
 
 
 class LiveReportTests(unittest.TestCase):

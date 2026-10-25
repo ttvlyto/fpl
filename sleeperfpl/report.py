@@ -24,7 +24,7 @@ from .models import PlayerCtx
 from .pricing import fixture_odds
 from .projection import project
 from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
-from .report_card import log_goal_odds, log_projections, score_weeks, summary
+from .report_card import log_goal_odds, log_matches, log_projections, log_recommendation, score_weeks, summary
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
 from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points, sleeper_weeks
 
@@ -189,6 +189,7 @@ def build_report(conn, cfg, now):
                        flag=_flag(p, el), fixtures=by_team.get(club, []) if el else [],
                        trending_adds=trending.get(sid))
         if el:
+            pl.ep_next = el["ep_next"]
             pos = FPL_POSITIONS.get(el["element_type"], "")
             weeks = sleeper_weeks(conn, sleeper_season, sid, last_finished) if use_sleeper else []
             if use_sleeper:
@@ -224,6 +225,9 @@ def build_report(conn, cfg, now):
     if use_sleeper and gw.gw:
         listed = [pl for group in ranked.values() for pl in group]
         log_projections(conn, sleeper_season, gw.gw, roster + listed, made_at)
+        first = gw.first_kickoff.strftime("%Y-%m-%dT%H:%M:%SZ") if gw.first_kickoff else None
+        log_recommendation(conn, sleeper_season, gw.gw, first, mine["roster_id"], lineup, swaps, made_at)
+        log_matches(conn, sleeper_season, gw.gw, fodds, fixtures, made_at)
     card = score_weeks(conn, sleeper_season, scoring, last_finished) if use_sleeper else []
     club_of = {sid: teams.get(el_by_id[fid]["team_id"]) for sid, fid in match.mapping.items() if fid in el_by_id}
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,

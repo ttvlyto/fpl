@@ -6,15 +6,36 @@ last projection made before his kickoff is compared with his real league points.
 
 import json
 
+from .metrics import position_group
 from .sleeper_stats import sleeper_points
 
 
 def log_projections(conn, season, gw, players, made_at):
     rows = [(made_at, season, gw, pl.sleeper_id, pl.fixtures[0].kickoff if pl.fixtures else None,
-             pl.proj_v1, pl.proj if pl.proj_source == "market" else None, pl.p_goal_market)
+             pl.proj_v1, pl.proj if pl.proj_source == "market" else None, pl.p_goal_market,
+             position_group(pl.positions), pl.ep_next)
             for pl in players if pl.fpl_id is not None]
     with conn:
-        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)", rows)
+        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    return len(rows)
+
+
+def log_recommendation(conn, season, gw, first_kickoff, roster_id, lineup, swaps, made_at):
+    """The XI and swaps this build suggested, so they can be graded after the week."""
+    xi = [pl.sleeper_id for _, pl in lineup.starters if pl]
+    pairs = [[s.drop.sleeper_id, s.add.sleeper_id] for s in swaps]
+    with conn:
+        conn.execute("INSERT INTO recommendation_log VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (made_at, season, gw, first_kickoff, roster_id, json.dumps(xi), json.dumps(pairs)))
+
+
+def log_matches(conn, season, gw, fodds, fixtures, made_at, method="market"):
+    """Fitted odds for the target week's fixtures, for the match report card."""
+    rows = [(made_at, season, gw, f["fixture_id"], f.get("kickoff_time"), method, o.lam_home, o.lam_away,
+             o.p_home, o.p_draw, o.p_away, o.cs_home, o.cs_away, o.n_quotes, o.avg_spread)
+            for f in fixtures if f.get("event") == gw and (o := fodds.get(f["fixture_id"]))]
+    with conn:
+        conn.executemany("INSERT INTO match_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     return len(rows)
 
 
