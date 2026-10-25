@@ -19,7 +19,8 @@ def sleeper_points(stats, scoring_settings):
     return sum(float(stats.get(k, 0) or 0) * float(v) for k, v in scoring_settings.items())
 
 
-def _stored_weeks(conn, season):
+def stored_weeks(conn, season):
+    """Weeks with any Sleeper stats rows: a finished week without them hasn't been fetched yet."""
     return {r[0] for r in conn.execute("SELECT DISTINCT week FROM sleeper_stats WHERE season = ?", (season,))}
 
 
@@ -29,7 +30,7 @@ def fetch_sleeper_stats(conn, sport, season, last_week, *, force=False, get=get_
     `update_meta=False` (past-season backfill) leaves the live "stats week" alone."""
     if not last_week:
         return 0
-    stored = _stored_weeks(conn, season)
+    stored = stored_weeks(conn, season)
     if force:
         weeks = set(range(1, last_week + 1))
     else:
@@ -51,7 +52,7 @@ def fetch_sleeper_stats(conn, sport, season, last_week, *, force=False, get=get_
                              [(season, week, str(pid), json.dumps(stats), ts)
                               for pid, stats in data.items() if isinstance(stats, dict)])
         fetched += 1
-    stored = _stored_weeks(conn, season)
+    stored = stored_weeks(conn, season)
     if stored and update_meta:
         meta_set(conn, META, str(max(stored)))
     return fetched

@@ -500,14 +500,17 @@ def _report_card(r):
     for w in rc.get("weeks", []):
         d = decisions.get(w["gw"])
         xi = "".join(f'<td class="num">{_num(d[k]) if d else "–"}</td>' for k in ("set_pts", "tool_pts", "best_pts"))
+        # v2 next to v1 on the same players only, never v1 over everyone
+        v2 = ("–" if w["mae_v2"] is None else
+              f'{_num(w["mae_v2"])} / {_num(w.get("mae_v1_paired"))} <small>({w.get("n_v2", 0)})</small>')
         rows.append(
             f'<tr><td>GW{w["gw"]}</td><td class="num">{w["n"]}</td><td class="num">{_num(w["mae_v1"])}</td>'
-            f'<td class="num">{_num(w.get("mae_v1_played"))}</td><td class="num">{_num(w["mae_v2"])}</td>'
+            f'<td class="num">{_num(w.get("mae_v1_played"))}</td><td class="num">{v2}</td>'
             f'<td class="num">{_rank(w.get("rank_v1"))}</td>'
             f'<td class="num">{"–" if w["brier_goal"] is None else format(w["brier_goal"], ".3f")} '
             f'<small>({w["n_goal"]})</small></td>{xi if show_xi else ""}</tr>')
     head = ('<tr><th>Week</th><th class="num">Players</th><th class="num">Avg miss (all)</th>'
-            '<th class="num">Avg miss (played)</th><th class="num">Avg miss v2</th><th class="num">Order (v1)</th>'
+            '<th class="num">Avg miss (played)</th><th class="num">Avg miss v2 / v1 (same players)</th><th class="num">Order (v1)</th>'
             '<th class="num">Goal-odds score</th>'
             + ('<th class="num">Your XI</th><th class="num">Tool XI</th><th class="num">Best XI</th>' if show_xi else "")
             + '</tr>')

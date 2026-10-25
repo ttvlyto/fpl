@@ -10,7 +10,7 @@ from .db import latest
 from .lineup import best_xi
 from .metrics import Scored, brier, category, error_summary, log_loss, mean, position_group, rank_by_position, rps
 from .models import PlayerCtx
-from .sleeper_stats import sleeper_points
+from .sleeper_stats import sleeper_points, stored_weeks
 
 
 def log_projections(conn, season, gw, players, made_at):
@@ -70,9 +70,12 @@ def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
     actual = {(week, pid): json.loads(raw) for week, pid, raw in conn.execute(
         "SELECT week, player_id, stats_json FROM sleeper_stats WHERE season = ? AND week <= ?",
         (season, last_finished))}
+    fetched = stored_weeks(conn, season)
     weeks = {}
     for key in set(latest) | set(goal):
         gw, sid = key
+        if gw not in fetched:
+            continue  # stats not fetched yet: scoring now would count everyone as 0
         stats = actual.get(key)
         pts = sleeper_points(stats, scoring) if stats else 0.0
         w = weeks.setdefault(gw, {"v1": [], "v2": [], "v1p": [], "ep": [], "v1e": [], "b": []})
@@ -125,8 +128,11 @@ def score_decisions(conn, season, scoring, last_finished, slots, eligibility):
     for r in latest(conn, "sleeper_players"):
         names[r["player_id"]] = r["name"] or r["player_id"]
         positions[r["player_id"]] = json.loads(r["positions_json"] or "[]")
+    fetched = stored_weeks(conn, season)
     out = []
     for gw in sorted(recs):
+        if gw not in fetched:
+            continue  # stats not fetched yet
         first, roster_id, xi, swaps = recs[gw]
         row = conn.execute("SELECT players_json, starters_json, reserve_json FROM sleeper_rosters "
                            "WHERE roster_id = ? AND fetched_at < ? ORDER BY fetched_at DESC LIMIT 1",

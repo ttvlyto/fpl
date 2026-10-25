@@ -88,6 +88,10 @@ class ReportCardTests(unittest.TestCase):
         self.assertEqual(week["n"], 1)
         self.assertIsNone(week["rank_v1"])
 
+    def test_week_without_stats_not_scored(self):
+        log_projections(self.conn, "2026", 9, [pl("a", 4)], "2026-10-23T10:00:00Z")
+        self.assertEqual(score_weeks(self.conn, "2026", SC, 9), [])     # stats not fetched yet: not all-zero
+
     def test_brier(self):
         log_projections(self.conn, "2026", 9, [pl("a", 4, p_goal=0.6)], "2026-10-23T10:00:00Z")
         self.stats("a", {"min": 90, "g": 1, "pos_m_g": 1})
@@ -178,6 +182,12 @@ class DecisionTests(unittest.TestCase):
 
     def test_no_roster_snapshot_before_kickoff(self):
         self.roster(["a", "b"], fetched_at="2026-10-24T15:00:00Z")
+        self.recommend(["b", "c"])
+        self.assertEqual(self.score(), [])
+
+    def test_week_without_stats_skipped(self):
+        self.conn.execute("DELETE FROM sleeper_stats")
+        self.roster(["a", "b"])
         self.recommend(["b", "c"])
         self.assertEqual(self.score(), [])
 
