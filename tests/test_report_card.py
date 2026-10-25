@@ -5,8 +5,8 @@ from sleeperfpl.db import connect
 from sleeperfpl.lineup import Lineup, Swap
 from sleeperfpl.models import Fixture, PlayerCtx
 from sleeperfpl.pricing import FixtureOdds
-from sleeperfpl.report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_weeks,
-                                    summary)
+from sleeperfpl.report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_decisions,
+                                    score_weeks, summary)
 
 SC = {"pos_m_g": 5}
 KO = "2026-10-24T14:00:00Z"
@@ -135,6 +135,61 @@ class LoggingTests(unittest.TestCase):
         row = self.conn.execute("SELECT fixture_id, kickoff, method, lam_home, cs_away, n_quotes, avg_spread "
                                 "FROM match_log").fetchone()
         self.assertEqual(tuple(row), (50, KO, "market", 1.8, 0.17, 4, 0.02))
+
+
+class DecisionTests(unittest.TestCase):
+    SLOTS, ELIG = ["M", "M"], {"M": ["M"]}
+
+    def setUp(self):
+        self.conn = connect(":memory:")
+        for pid, g in (("a", 0.4), ("b", 1), ("c", 1.6), ("d", 0.6)):     # 2, 5, 8 and 3 points
+            self.conn.execute("INSERT INTO sleeper_players VALUES ('t', ?, ?, 'ARS', '[\"M\"]', 'Active', NULL, 1)",
+                              (pid, pid.upper()))
+            self.conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, ?, ?, 'x')",
+                              (pid, json.dumps({"min": 90, "pos_m_g": g})))
+
+    def roster(self, starters, fetched_at="2026-10-23T20:00:00Z"):
+        self.conn.execute("INSERT INTO sleeper_rosters VALUES (?, 3, 'u1', ?, ?, '[]')",
+                          (fetched_at, json.dumps(["a", "b", "c"]), json.dumps(starters)))
+
+    def recommend(self, xi, swaps=(), made_at="2026-10-23T10:00:00Z"):
+        self.conn.execute("INSERT INTO recommendation_log VALUES (?, '2026', 9, ?, 3, ?, ?)",
+                          (made_at, KO, json.dumps(xi), json.dumps([list(s) for s in swaps])))
+
+    def score(self):
+        return score_decisions(self.conn, "2026", SC, 9, self.SLOTS, self.ELIG)
+
+    def test_decisions_compare_set_tool_best(self):
+        self.roster(["a", "b"])
+        self.recommend(["b", "c"], [("a", "d")])
+        d = self.score()[0]
+        self.assertEqual(d["gw"], 9)
+        self.assertAlmostEqual(d["set_pts"], 7)
+        self.assertAlmostEqual(d["tool_pts"], 13)
+        self.assertAlmostEqual(d["best_pts"], 13)
+        swap = d["swaps"][0]
+        self.assertEqual((swap["drop"], swap["add"]), ("A", "D"))
+        self.assertAlmostEqual(swap["diff"], 1)
+
+    def test_recommendation_after_kickoff_ignored(self):
+        self.roster(["a", "b"])
+        self.recommend(["b", "c"], made_at="2026-10-24T15:00:00Z")
+        self.assertEqual(self.score(), [])
+
+    def test_no_roster_snapshot_before_kickoff(self):
+        self.roster(["a", "b"], fetched_at="2026-10-24T15:00:00Z")
+        self.recommend(["b", "c"])
+        self.assertEqual(self.score(), [])
+
+    def test_empty_slot_id_ignored(self):
+        self.roster(["a", "0"])
+        self.recommend(["b", "c"])
+        self.assertAlmostEqual(self.score()[0]["set_pts"], 2)
+
+    def test_summary_prefers_decisions(self):
+        decisions = [{"gw": 8, "set_pts": 5, "tool_pts": 9}, {"gw": 9, "set_pts": 9, "tool_pts": 5}]
+        self.assertEqual(summary([], decisions), "the tool's XI beat your lineup in 1 of 2 weeks")
+        self.assertEqual(summary([], decisions[:1]), "not enough weeks yet")
 
 
 class PairedComparisonTests(unittest.TestCase):

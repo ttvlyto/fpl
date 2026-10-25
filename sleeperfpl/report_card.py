@@ -6,7 +6,10 @@ last projection made before his kickoff is compared with his real league points.
 
 import json
 
+from .db import latest
+from .lineup import best_xi
 from .metrics import Scored, brier, category, error_summary, mean, position_group, rank_by_position
+from .models import PlayerCtx
 from .sleeper_stats import sleeper_points
 
 
@@ -102,7 +105,57 @@ def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
     return out
 
 
-def summary(weeks):
+def score_decisions(conn, season, scoring, last_finished, slots, eligibility):
+    """Per finished week: real points of the lineup you set, the XI this page suggested,
+    and the best XI possible from the same roster, plus how each swap tip turned out.
+
+    Uses the last recommendation before the week's first kickoff and the newest
+    roster snapshot before it; weeks missing either are skipped."""
+    if last_finished is None:
+        return []
+    recs = {}
+    for made_at, gw, first, roster_id, xi_json, swaps_json in conn.execute(
+            "SELECT made_at, gw, first_kickoff, roster_id, xi_json, swaps_json FROM recommendation_log "
+            "WHERE season = ? AND gw <= ? AND first_kickoff IS NOT NULL AND made_at < first_kickoff "
+            "ORDER BY made_at", (season, last_finished)):
+        recs[gw] = (first, roster_id, json.loads(xi_json or "[]"), json.loads(swaps_json or "[]"))
+    if not recs:
+        return []
+    names, positions = {}, {}
+    for r in latest(conn, "sleeper_players"):
+        names[r["player_id"]] = r["name"] or r["player_id"]
+        positions[r["player_id"]] = json.loads(r["positions_json"] or "[]")
+    out = []
+    for gw in sorted(recs):
+        first, roster_id, xi, swaps = recs[gw]
+        row = conn.execute("SELECT players_json, starters_json, reserve_json FROM sleeper_rosters "
+                           "WHERE roster_id = ? AND fetched_at < ? ORDER BY fetched_at DESC LIMIT 1",
+                           (roster_id, first)).fetchone()
+        if row is None:
+            continue
+        players = json.loads(row[0] or "[]")
+        starters = json.loads(row[1] or "[]")
+        reserve = set(json.loads(row[2] or "[]"))
+        stats = {pid: json.loads(raw) for pid, raw in conn.execute(
+            "SELECT player_id, stats_json FROM sleeper_stats WHERE season = ? AND week = ?", (season, gw))}
+
+        def pts(pid):
+            return sleeper_points(stats[pid], scoring) if pid in stats else 0.0
+        pool = [PlayerCtx(sleeper_id=pid, name=names.get(pid, pid), positions=positions.get(pid, []), club="",
+                          fpl_id=0, proj=pts(pid)) for pid in players if pid not in reserve]
+        out.append({"gw": gw,
+                    "set_pts": sum(pts(pid) for pid in starters if pid in players),
+                    "tool_pts": sum(pts(pid) for pid in xi),
+                    "best_pts": best_xi(pool, slots, eligibility).total,
+                    "swaps": [{"drop": names.get(d, d), "add": names.get(a, a), "drop_pts": pts(d),
+                               "add_pts": pts(a), "diff": pts(a) - pts(d)} for d, a in swaps]})
+    return out
+
+
+def summary(weeks, decisions=None):
+    if decisions and len(decisions) >= 2:
+        wins = sum(1 for d in decisions if d["tool_pts"] > d["set_pts"])
+        return f"the tool's XI beat your lineup in {wins} of {len(decisions)} weeks"
     compared = [w for w in weeks if w.get("n_v2") and w.get("mae_v2") is not None]
     if len(compared) < 2:
         return "not enough weeks yet"

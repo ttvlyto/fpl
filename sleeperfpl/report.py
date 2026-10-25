@@ -24,7 +24,8 @@ from .models import PlayerCtx
 from .pricing import fixture_odds
 from .projection import project
 from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
-from .report_card import log_goal_odds, log_matches, log_projections, log_recommendation, score_weeks, summary
+from .report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_decisions,
+                          score_weeks, summary)
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
 from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points, sleeper_weeks
 
@@ -230,6 +231,8 @@ def build_report(conn, cfg, now):
         log_matches(conn, sleeper_season, gw.gw, fodds, fixtures, made_at)
     card = (score_weeks(conn, sleeper_season, scoring, last_finished, cfg.category_low, cfg.category_haul)
             if use_sleeper else [])
+    decisions = (score_decisions(conn, sleeper_season, scoring, last_finished, slots, cfg.slot_eligibility)
+                 if use_sleeper else [])
     club_of = {sid: teams.get(el_by_id[fid]["team_id"]) for sid, fid in match.mapping.items() if fid in el_by_id}
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
                        {p["player_id"]: p for p in players}, sleeper_season, fodds, club_of, goal_quotes)
@@ -242,8 +245,9 @@ def build_report(conn, cfg, now):
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "live": live,
-        "report_card": {"weeks": [{k: (round(v, 2) if isinstance(v, float) else v) for k, v in w.items()}
-                                  for w in card[-8:]], "summary": summary(card)},
+        "report_card": {"weeks": [_rounded(w) for w in card[-8:]],
+                        "decisions": [_rounded(d) for d in decisions[-8:]],
+                        "summary": summary(card, decisions)},
         "matches": matches,
         "markets_unmatched": markets_unmatched,
         "projection_note": note,
@@ -274,6 +278,17 @@ def build_report(conn, cfg, now):
         "unmatched_rostered": [_player_dict(pl) for pl in roster if pl.fpl_id is None],
         "unmatched_count": len(match.unmatched),
     }
+
+
+def _rounded(value):
+    """Floats to 2 places, through nested dicts and lists (report card rows)."""
+    if isinstance(value, float):
+        return round(value, 2)
+    if isinstance(value, dict):
+        return {k: _rounded(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_rounded(v) for v in value]
+    return value
 
 
 def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
