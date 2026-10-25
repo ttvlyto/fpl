@@ -27,6 +27,10 @@ python3 -m sleeperfpl build                   # writes site/index.html
 
 Open `site/index.html` in a browser.
 
+To check how accurate the projections have been on past weeks, run
+`python3 -m sleeperfpl backtest` (add `fetch-history --season 2025` once to
+include last season).
+
 ## Documentation
 
 See [docs/README.md](docs/README.md) for every command and config key, how

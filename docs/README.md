@@ -90,6 +90,7 @@ paths inside the config (`db_path`, `output_dir`, `scoring_map_path`,
 | `coverage` | Reads only `scoring_map.json` and the stored league (no DB writes). Lists the rules, which ones FPL can and can't cover, league scoring keys missing from the map or with different points, and makes two live probes of Sleeper's stats endpoints (`api.sleeper.app` and `api.sleeper.com`; see Data sources). |
 | `fetch-markets` | Kalshi and Polymarket match odds (no player markets; those come from `matchday`). A failing source warns and writes nothing; it doesn't stop the other. |
 | `matchday [--force]` | For match days. Runs only if a kickoff falls within the next `matchday_window_hours`, or a match kicked off between 2.5 and 5 hours ago (just finished; this post-match window is fixed, not configurable). `--force` runs anyway. When it runs it refreshes rosters, fixtures, Kalshi odds including player markets, Polymarket odds, live Sleeper stats for the current game week, then runs `build`. Each step that fails only prints `warning: <step> failed` and the rest continue. When not due it prints a "skipped" line, does not build, and exits 0. |
+| `backtest [--season S] [--json PATH]` | Replays finished game weeks to compare projection methods (`v1` and a naive `season_avg` today). For week *g* it uses only each player's Sleeper stats from earlier weeks of the same season, scores every player who played in one of the 5 weeks before, and prints per week the average miss (everyone / played only) and how well each method ordered players within each position, then how many weeks each method beat `v1`. Seasons are reported separately. `--season` (repeatable) picks seasons, default all stored. `--json` also writes the full results. Past seasons have no fixture data, so `v1` runs with a neutral multiplier there and blank or double weeks are skipped. Read-only. |
 | `build` | Writes `report.json` and `index.html` to `output_dir` (via a temp file and rename) and, when it uses Sleeper stats and there is a target game week, appends to `projection_log`. Prints `wrote <dir>/index.html (GW<n>, <k> swap tips)`. |
 
 Every command first opens the database, creating `data/` and all tables if
@@ -257,6 +258,11 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
   `Sleeper player <id>` with flag "no data".
 - **Market data parsing** depends on Kalshi and Polymarket response fields and
   on team-code aliases (`market_teams` overrides fix the rest).
+- **Backtest approximations.** In the current season, fixture difficulty comes
+  from the newest FPL snapshot and each player is placed at his current club, so a
+  mid-season transfer is replayed at his new club. Past seasons have no fixture
+  data (neutral multiplier), and the backtest can't replay market odds, injury
+  flags or lineup decisions, because none of those were stored back then.
 - **Planned, not built:** a prediction model to replace the projection step, and
   a Claude "second opinion" that reads `site/report.json`.
 
@@ -372,6 +378,8 @@ sleeperfpl/
   live.py            in-week alerts and 0-minute bench swaps
   report_card.py     projection accuracy per finished game week
   report.py          assemble report.json and render index.html
+  metrics.py         scoring functions shared by the report card and backtest
+  backtest.py        replay past weeks to compare projection methods
   models.py          shared dataclasses
 ```
 

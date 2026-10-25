@@ -4,7 +4,9 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
+from .backtest import format_backtest, run_backtest
 from .config import ConfigError, load_config
 from .db import connect, latest
 from .fetch_fpl import fetch_bootstrap, fetch_fixtures, fetch_history
@@ -122,6 +124,16 @@ def cmd_build(cfg, conn, args):
     print(f"wrote {cfg.output_dir / 'index.html'} (GW{report['gameweek']}, {len(report['swaps'])} swap tips)")
 
 
+def cmd_backtest(cfg, conn, args):
+    if conn.execute("SELECT 1 FROM sleeper_stats LIMIT 1").fetchone() is None:
+        raise BuildError("no Sleeper stats yet; run fetch-history first")
+    result = run_backtest(conn, cfg, args.season or None)
+    print(format_backtest(result))
+    if args.json:
+        Path(args.json).write_text(json.dumps(result, indent=2))
+        print(f"wrote {args.json}")
+
+
 COMMANDS = {
     "fetch-daily": (cmd_fetch_daily, "league, players, FPL bootstrap + fixtures"),
     "fetch-rosters": (cmd_fetch_rosters, "rosters + trending adds"),
@@ -130,6 +142,7 @@ COMMANDS = {
     "fetch-markets": (cmd_fetch_markets, "Kalshi + Polymarket match odds"),
     "matchday": (cmd_matchday, "before kickoffs / after matches: odds, player markets, live stats, rebuild"),
     "build": (cmd_build, "write report.json and index.html"),
+    "backtest": (cmd_backtest, "replay past weeks to compare projection methods"),
 }
 
 
@@ -141,6 +154,9 @@ def main(argv=None):
         p = sub.add_parser(name, help=help_text)
         if name == "matchday":
             p.add_argument("--force", action="store_true", help="run even if no match is near")
+        if name == "backtest":
+            p.add_argument("--season", action="append", help="season to replay (repeatable; default: all stored)")
+            p.add_argument("--json", help="also write the full results to this file")
         if name == "fetch-history":
             p.add_argument("--force", action="store_true", help="refetch even if no new game week finished")
             p.add_argument("--season", help="fetch a past season's Sleeper stats (e.g. 2025), for backtest")

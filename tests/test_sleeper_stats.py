@@ -1,5 +1,7 @@
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
 
 from sleeperfpl.db import connect, meta_get
 from sleeperfpl.http import FetchError
@@ -90,7 +92,8 @@ class BackfillTests(unittest.TestCase):
         import sleeperfpl.__main__ as cli
         self._league()
         stats, fpl = mock.Mock(return_value=38), mock.Mock()
-        with mock.patch.object(cli, "fetch_sleeper_stats", stats), mock.patch.object(cli, "fetch_history", fpl):
+        with mock.patch.object(cli, "fetch_sleeper_stats", stats), mock.patch.object(cli, "fetch_history", fpl), \
+             redirect_stdout(io.StringIO()):
             cli.cmd_fetch_history(mock.Mock(), self.conn, mock.Mock(force=False, season="2025"))
         fpl.assert_not_called()
         args, kwargs = stats.call_args
