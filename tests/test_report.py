@@ -44,8 +44,9 @@ def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
     elements = [(1, "David", "Raya", "Raya", 1, 1), (2, "Bukayo", "Saka", "Saka", 1, 3),
                 (3, "Declan", "Rice", "Rice", 1, 3), (5, "Cole", "Palmer", "Palmer", 2, 3),
                 (6, "Marc", "Cucurella", "Cucurella", 2, 2)]
-    conn.executemany("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                     [(ts, fid, f, s, w, t, et, "a", None, 900, None) for fid, f, s, w, t, et in elements])
+    conn.executemany("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     [(ts, fid, f, s, w, t, et, "a", None, 900, None, None, None, None)
+                      for fid, f, s, w, t, et in elements])
     conn.executemany("INSERT INTO fpl_teams VALUES (?,?,?,?)", [(ts, 1, "ARS", "Arsenal"), (ts, 2, "CHE", "Chelsea")])
     conn.executemany("INSERT INTO fpl_events VALUES (?,?,?,?)", [(ts, 1, "2026-08-15T10:00:00Z", 1), (ts, 8, "2026-10-17T10:00:00Z", 1),
                                                                  (ts, 9, "2026-10-24T10:00:00Z", 0)])
@@ -434,7 +435,7 @@ class ReviewFixLiveReportTests(LiveReportTests):
         boom = mock.Mock(side_effect=RuntimeError("down"))
         with mock.patch.object(cli, "fetch_rosters", boom), mock.patch.object(cli, "fetch_fixtures", boom), \
              mock.patch.object(cli, "fetch_kalshi", boom), mock.patch.object(cli, "fetch_polymarket", boom), \
-             mock.patch.object(cli, "fetch_sleeper_stats", boom), \
+             mock.patch.object(cli, "fetch_sleeper_stats", boom), mock.patch.object(cli, "fetch_bootstrap", boom), \
              mock.patch.object(cli, "matchday_due", return_value=True), \
              mock.patch.object(cli, "cmd_build", lambda *a: built.append(1)):
             cli.cmd_matchday(self.cfg, self.conn, mock.Mock(force=False))

@@ -7,14 +7,20 @@
 # Daily: league, players, FPL bootstrap + fixtures
 0 6 * * *     cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-daily ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
-# Daily: FPL match history (no-op unless a new game week has finished)
-30 3 * * *    cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-history ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+# Daily: FPL match history (no-op unless a new game week has finished), then refit the minutes model
+# (fit-minutes skips itself when no new week is stored)
+30 3 * * *    cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-history ; python3 -m sleeperfpl fit-minutes ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
 # Every 4 hours: rosters + trending adds
 0 */4 * * *   cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-rosters ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
 # Thursdays, hourly from noon: rosters + trending before lineups are set
 0 12-23 * * 4 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-rosters ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+
+# Every 4 hours, and hourly on Thursday and Friday afternoons (press conferences):
+# FPL injury flags and chances, which the minutes model's labels read
+30 */4 * * *  cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-status ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+30 12-23 * * 4,5 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-status ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
 # Every 2 hours: Kalshi + Polymarket match odds
 15 */2 * * *  cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-markets; python3 -m sleeperfpl build' >> data/cron.log 2>&1

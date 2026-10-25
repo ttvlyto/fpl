@@ -37,6 +37,11 @@ def cmd_fetch_daily(cfg, conn, args):
         print(f"created {cfg.scoring_map_path}; review it, then run `coverage`")
 
 
+def cmd_fetch_status(cfg, conn, args):
+    # Injury flags and chances only: cheap enough to run around press conferences.
+    print(f"fpl players: {fetch_bootstrap(conn)}")
+
+
 def cmd_fetch_rosters(cfg, conn, args):
     print(f"rosters: {fetch_rosters(conn, cfg.league_id)}")
     print(f"trending: {fetch_trending(conn, _league(conn)['sport'])}")
@@ -107,6 +112,7 @@ def cmd_matchday(cfg, conn, args):
             sys.stderr.write(f"warning: {label} failed: {e}\n")
 
     step("rosters", lambda: fetch_rosters(conn, cfg.league_id))
+    step("fpl status", lambda: fetch_bootstrap(conn))
     step("fpl fixtures", lambda: fetch_fixtures(conn))
     step("kalshi (with players)", lambda: fetch_kalshi(conn, players=True))
     step("polymarket", lambda: fetch_polymarket(conn))
@@ -137,6 +143,7 @@ def cmd_backtest(cfg, conn, args):
 COMMANDS = {
     "fetch-daily": (cmd_fetch_daily, "league, players, FPL bootstrap + fixtures"),
     "fetch-rosters": (cmd_fetch_rosters, "rosters + trending adds"),
+    "fetch-status": (cmd_fetch_status, "FPL bootstrap only: injury flags and chances"),
     "fetch-history": (cmd_fetch_history, "Sleeper weekly stats + FPL match history (after a game week finishes)"),
     "coverage": (cmd_coverage, "how much of the league's scoring FPL covers"),
     "fetch-markets": (cmd_fetch_markets, "Kalshi + Polymarket match odds"),

@@ -89,6 +89,15 @@ class NewSettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "stats_source"):
             self.load({"stats_source": "espn"})
 
+    def test_minutes_defaults_and_validation(self):
+        cfg = self.load({})
+        self.assertEqual((cfg.minutes_model, cfg.label_prior_k, cfg.sleeper_label_weight), ("shadow", 20, 1.0))
+        self.assertEqual(self.load({"minutes_model": "on"}).minutes_model, "on")
+        with self.assertRaisesRegex(ConfigError, "minutes_model"):
+            self.load({"minutes_model": "maybe"})
+        with self.assertRaisesRegex(ConfigError, "sleeper_label_weight"):
+            self.load({"sleeper_label_weight": 1.5})
+
     def test_undroppable_must_be_list(self):
         with self.assertRaisesRegex(ConfigError, "undroppable"):
             self.load({"undroppable": "Bukayo Saka"})

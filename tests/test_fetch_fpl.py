@@ -59,6 +59,15 @@ class FetchFplTests(unittest.TestCase):
         got = {r["fpl_id"]: r["ep_next"] for r in latest(self.conn, "fpl_elements")}
         self.assertEqual(got, {1: 4.5, 2: None})
 
+    def test_bootstrap_stores_news_and_chance_this(self):
+        data = bootstrap()
+        data["elements"][0].update(news="Knock", news_added="2026-10-20T10:00:00Z",
+                                   chance_of_playing_this_round=75)
+        fetch_bootstrap(self.conn, get=Recorder({"bootstrap-static/": data}))
+        row = next(r for r in latest(self.conn, "fpl_elements") if r["fpl_id"] == 1)
+        self.assertEqual((row["news"], row["news_added"], row["chance_this"]),
+                         ("Knock", "2026-10-20T10:00:00Z", 75))
+
     def test_fixtures_store_scores(self):
         fetch_fixtures(self.conn, get=Recorder({"fixtures/": [
             {"id": 5, "event": 9, "team_h": 1, "team_a": 2, "team_h_difficulty": 2, "team_a_difficulty": 4,

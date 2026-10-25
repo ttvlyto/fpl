@@ -37,7 +37,12 @@ DEFAULTS = {
     # Report card outcome groups, in league points: low < category_low <= mid < category_haul <= haul.
     "category_low": 3,
     "category_haul": 10,
+    # Expected minutes: "shadow" computes and logs v1m/v2m; "on" also uses them for picks.
+    "minutes_model": "shadow",
+    "label_prior_k": 20,           # pseudo-observations behind each label's starting guess
+    "sleeper_label_weight": 1.0,   # 0 ignores Sleeper's injury labels in the minutes model
 }
+MINUTES_MODES = ("shadow", "on")
 STATS_SOURCES = ("sleeper", "fpl")
 REQUIRED = ("league_id", "owner")
 PATH_KEYS = ("db_path", "output_dir", "scoring_map_path", "overrides_path")
@@ -73,6 +78,9 @@ class Config:
     flag_goal_gap: float = 0.20
     category_low: float = 3
     category_haul: float = 10
+    minutes_model: str = "shadow"
+    label_prior_k: float = 20
+    sleeper_label_weight: float = 1.0
 
 
 def load_config(path: str | None = None) -> Config:
@@ -125,10 +133,17 @@ def load_config(path: str | None = None) -> Config:
             flag_goal_gap=float(merged["flag_goal_gap"]),
             category_low=float(merged["category_low"]),
             category_haul=float(merged["category_haul"]),
+            minutes_model=merged["minutes_model"],
+            label_prior_k=float(merged["label_prior_k"]),
+            sleeper_label_weight=float(merged["sleeper_label_weight"]),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:
         raise ConfigError(f"Bad value in {cfg_path}: {e}")
+    if cfg.minutes_model not in MINUTES_MODES:
+        raise ConfigError(f"{cfg_path}: minutes_model must be one of {', '.join(MINUTES_MODES)}")
+    if not 0 <= cfg.sleeper_label_weight <= 1:
+        raise ConfigError(f"{cfg_path}: sleeper_label_weight must be between 0 and 1")
     if not cfg.category_low < cfg.category_haul:
         raise ConfigError(f"{cfg_path}: category_low must be less than category_haul")
     return cfg

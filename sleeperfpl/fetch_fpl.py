@@ -25,10 +25,11 @@ def fetch_bootstrap(conn, get=get_json):
     ts = now_iso()
     with conn:
         conn.executemany(
-            "INSERT INTO fpl_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO fpl_elements VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [(ts, e["id"], e.get("first_name"), e.get("second_name"), e.get("web_name"),
               e.get("team"), e.get("element_type"), e.get("status"),
-              e.get("chance_of_playing_next_round"), e.get("minutes") or 0, _float(e.get("ep_next")))
+              e.get("chance_of_playing_next_round"), e.get("minutes") or 0, _float(e.get("ep_next")),
+              e.get("news") or None, e.get("news_added"), e.get("chance_of_playing_this_round"))
              for e in data.get("elements", [])],
         )
         conn.executemany(

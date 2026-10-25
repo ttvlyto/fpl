@@ -53,9 +53,28 @@ class DbTests(unittest.TestCase):
         self.assertIn("ep_next", cols("fpl_elements"))
         self.assertIn("position", cols("projection_log"))
         self.assertIn("ep_next", cols("projection_log"))
-        conn.execute("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?,?)", ("t", 1, "", "", "", 1, 3, "a", None, 0, 4.5))
+        conn.execute("INSERT INTO fpl_elements (fetched_at, fpl_id, ep_next) VALUES (?, ?, ?)", ("t", 1, 4.5))
         row = conn.execute("SELECT v1, position FROM projection_log").fetchone()
         self.assertEqual((row[0], row[1]), (4, None))
+        conn.close()
+
+    def test_new_columns_migrate(self):
+        path = self.tmp / "old2.db"
+        old = sqlite3.connect(path)
+        old.execute("CREATE TABLE fpl_elements (fetched_at, fpl_id, first_name, second_name, web_name, team_id, "
+                    "element_type, status, chance_next, total_minutes, ep_next)")
+        old.execute("CREATE TABLE projection_log (made_at TEXT, season TEXT, gw INTEGER, sleeper_id TEXT, "
+                    "kickoff TEXT, v1 REAL, v2 REAL, p_goal_market REAL, position TEXT, ep_next REAL)")
+        old.commit()
+        old.close()
+        conn = connect(path)
+        cols = lambda t: [r[1] for r in conn.execute(f"PRAGMA table_info({t})")]
+        self.assertIn("chance_this", cols("fpl_elements"))
+        self.assertIn("news_added", cols("fpl_elements"))
+        self.assertIn("label_at", cols("projection_log"))
+        self.assertIn("p_start_model", cols("projection_log"))
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        self.assertLessEqual({"minutes_model", "label_counts"}, tables)
         conn.close()
 
     def test_connect_twice_is_idempotent(self):

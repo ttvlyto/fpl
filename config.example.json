@@ -72,5 +72,8 @@
   "flag_cs_gap": 0.25,
   "flag_goal_gap": 0.2,
   "category_low": 3,
-  "category_haul": 10
+  "category_haul": 10,
+  "minutes_model": "shadow",
+  "label_prior_k": 20,
+  "sleeper_label_weight": 1.0
 }

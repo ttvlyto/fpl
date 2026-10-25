@@ -16,10 +16,10 @@ from .sleeper_stats import sleeper_points, stored_weeks
 def log_projections(conn, season, gw, players, made_at):
     rows = [(made_at, season, gw, pl.sleeper_id, pl.fixtures[0].kickoff if pl.fixtures else None,
              pl.proj_v1, pl.proj if pl.proj_source == "market" else None, pl.p_goal_market,
-             position_group(pl.positions), pl.ep_next)
+             position_group(pl.positions), pl.ep_next) + (None,) * 13
             for pl in players if pl.fpl_id is not None]
     with conn:
-        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+        conn.executemany(f"INSERT INTO projection_log VALUES ({', '.join('?' * 23)})", rows)
     return len(rows)
 
 
@@ -45,7 +45,8 @@ def log_matches(conn, season, gw, fodds, fixtures, made_at, method="market"):
 def log_goal_odds(conn, season, gw, rows, made_at):
     """Match-day player goal odds (no projection): rows of (sleeper_id, kickoff, p_goal)."""
     with conn:
-        conn.executemany("INSERT INTO projection_log VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL)",
+        conn.executemany("INSERT INTO projection_log (made_at, season, gw, sleeper_id, kickoff, p_goal_market) "
+                         "VALUES (?, ?, ?, ?, ?, ?)",
                          [(made_at, season, gw, sid, kickoff, p) for sid, kickoff, p in rows])
     return len(rows)
 

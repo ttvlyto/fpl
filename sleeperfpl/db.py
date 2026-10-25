@@ -15,7 +15,7 @@ SNAPSHOT_TABLES = {
     "sleeper_users": "fetched_at, user_id, display_name",
     "sleeper_trending": "fetched_at, direction, player_id, count",
     "fpl_elements": ("fetched_at, fpl_id, first_name, second_name, web_name, team_id, "
-                     "element_type, status, chance_next, total_minutes, ep_next"),
+                     "element_type, status, chance_next, total_minutes, ep_next, news, news_added, chance_this"),
     "fpl_teams": "fetched_at, team_id, short_name, name",
     "fpl_events": "fetched_at, event_id, deadline_time, finished",
     "fpl_fixtures": ("fetched_at, fixture_id, event, team_h, team_a, team_h_difficulty, "
@@ -38,6 +38,18 @@ CREATE TABLE IF NOT EXISTS sleeper_stats (
     PRIMARY KEY (season, week, player_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+-- Fitted start models; the newest version is used.
+CREATE TABLE IF NOT EXISTS minutes_model (
+    version TEXT PRIMARY KEY, fitted_at TEXT, n_rows INTEGER, trained_on TEXT, model_json TEXT,
+    holdout_brier REAL
+);
+-- How often players with each label started and played (O) against the model's expectation (E).
+-- Rebuilt from projection_log and sleeper_stats, never appended.
+CREATE TABLE IF NOT EXISTS label_counts (
+    season TEXT, kind TEXT, cell TEXT, n INTEGER, starts INTEGER, apps INTEGER, sixty INTEGER,
+    e_start REAL, e_app REAL, built_at TEXT,
+    PRIMARY KEY (season, kind, cell)
+);
 """
 
 # Append-only logs for the report card. Columns are only ever added at the end,
@@ -45,7 +57,11 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 LOG_TABLES = {
     # Every build's projections.
     "projection_log": ("made_at TEXT, season TEXT, gw INTEGER, sleeper_id TEXT, kickoff TEXT, "
-                       "v1 REAL, v2 REAL, p_goal_market REAL, position TEXT, ep_next REAL"),
+                       "v1 REAL, v2 REAL, p_goal_market REAL, position TEXT, ep_next REAL, "
+                       # Minutes model (shadow): final and pre-label probabilities, and the labels used.
+                       "v1m REAL, v2m REAL, p_start REAL, p_app REAL, p60 REAL, e_min REAL, "
+                       "fpl_bucket TEXT, slp_bucket TEXT, p_start_model REAL, p_app_model REAL, "
+                       "p_start_fpl REAL, p_app_fpl REAL, label_at TEXT"),
     # Every build's fitted match odds; method: market (later blend or rating).
     "match_log": ("made_at TEXT, season TEXT, gw INTEGER, fixture_id INTEGER, kickoff TEXT, method TEXT, "
                   "lam_home REAL, lam_away REAL, p_home REAL, p_draw REAL, p_away REAL, "
@@ -55,7 +71,8 @@ LOG_TABLES = {
                            "xi_json TEXT, swaps_json TEXT"),
 }
 
-TABLES = set(SNAPSHOT_TABLES) | set(LOG_TABLES) | {"fpl_history", "sleeper_stats", "meta"}
+TABLES = set(SNAPSHOT_TABLES) | set(LOG_TABLES) | {"fpl_history", "sleeper_stats", "meta", "minutes_model",
+                                                    "label_counts"}
 
 
 def now_iso():
