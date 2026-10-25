@@ -1,7 +1,8 @@
+import math
 import unittest
 
-from sleeperfpl.metrics import (Scored, brier, category, error_summary, log_loss, mean, position_group,
-                                rank_by_position, rps, spearman)
+from sleeperfpl.metrics import (Scored, brier, category, error_summary, log_loss, mean, mean_ci, paired_t,
+                                position_group, rank_by_position, reliability, rps, signflip_p, spearman, wilson)
 
 
 class MetricsTests(unittest.TestCase):
@@ -54,3 +55,36 @@ class MetricsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StatsTests(unittest.TestCase):
+    def test_wilson(self):
+        lo, hi = wilson(5, 10)
+        self.assertAlmostEqual(lo, 0.2693, places=3)   # z = 1.645: (0.6353 - 0.2932) / 1.2706
+        self.assertAlmostEqual(hi, 0.7307, places=3)
+        self.assertEqual(wilson(0, 0), (0.0, 1.0))
+
+    def test_paired_t(self):
+        t, df = paired_t([1, 2, 3])
+        self.assertAlmostEqual(t, 3.4641, places=3)
+        self.assertEqual(df, 2)
+        self.assertIsNone(paired_t([1, 1])[0])
+        self.assertIsNone(paired_t([1])[0])
+
+    def test_mean_ci(self):
+        lo, hi = mean_ci([1, 2, 3])
+        half = 4.303 / math.sqrt(3)
+        self.assertAlmostEqual(lo, 2 - half, places=3)
+        self.assertAlmostEqual(hi, 2 + half, places=3)
+        self.assertIsNone(mean_ci([1]))
+
+    def test_signflip(self):
+        self.assertGreater(signflip_p([1, -1, 1, -1]), 0.9)
+        self.assertLess(signflip_p([5] * 10), 0.01)
+        self.assertIsNone(signflip_p([]))
+
+    def test_reliability(self):
+        bins = reliability([(0.05, False), (0.95, True), (1.0, True)])
+        self.assertEqual(len(bins), 2)
+        self.assertEqual((bins[-1]["n"], bins[-1]["observed"]), (2, 1.0))
+        self.assertAlmostEqual(bins[0]["mean_p"], 0.05)
