@@ -515,7 +515,7 @@ missing columns in place.
 | `match_log` | none (append-only) | every build's fitted odds per target-week fixture (`method`, `lam_home`, `lam_away`, win/draw/away and clean-sheet chances, `n_quotes`, `avg_spread`) |
 | `recommendation_log` | none (append-only) | every build's suggested XI (`xi_json`) and swaps (`swaps_json`), with `roster_id` and the week's `first_kickoff` |
 | `match_results` | `(season, date, home, away)` | past Premier League results from `fetch-results` (`home_goals`, `away_goals`); `season` is the start year, teams are FPL names |
-| `second_opinion_log` | none (append-only) | each Claude second opinion: `season`, `gw`, `first_kickoff`, `model`, `xi_json`, `swaps_json`, `notes_json`, `summary`, `input_tokens`, `output_tokens` |
+| `second_opinion_log` | none (append-only) | each Claude second opinion: `season`, `gw`, `first_kickoff`, `model` (the one that answered, which differs from config when the API fell back to another model), `xi_json`, `swaps_json`, `notes_json`, `summary`, `input_tokens`, `output_tokens` (every attempt, including retries and fallbacks) |
 | `meta` | `key` | small key/value state |
 
 ## Code layout

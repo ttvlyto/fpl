@@ -203,7 +203,17 @@ minutes is worth less than a regular starter at a small one. Cite only numbers t
 packet, and never invent a statistic. Keep every reason to one sentence. Write matchup notes only
 for fixtures involving the roster or your adds. Return no swaps if none clearly helps."""
 
-Reply = namedtuple("Reply", "text stop_reason input_tokens output_tokens")
+Reply = namedtuple("Reply", "text stop_reason input_tokens output_tokens model", defaults=(None,))
+
+
+def _usage(usage, model):
+    """(input tokens, output tokens, model that answered). With a server-side fallback each attempt is
+    an entry in usage.iterations; count them all (never less than the top-level figures). Compaction
+    entries don't happen here and aren't counted."""
+    entries = [i for i in (getattr(usage, "iterations", None) or []) if i.type in ("message", "fallback_message")]
+    served = next((i.model for i in entries if i.type == "fallback_message"), model)
+    return (max(usage.input_tokens, sum(i.input_tokens for i in entries)),
+            max(usage.output_tokens, sum(i.output_tokens for i in entries)), served)
 
 
 def _default_call(request):
@@ -220,7 +230,7 @@ def _default_call(request):
     except anthropic.APIError as e:
         raise BuildError(f"Anthropic API: {e}")
     text = "".join(b.text for b in m.content if b.type == "text")
-    return Reply(text, m.stop_reason, m.usage.input_tokens, m.usage.output_tokens)
+    return Reply(text, m.stop_reason, *_usage(m.usage, request["model"]))
 
 
 def make_request(packet, cfg, problems=None, previous=None):
@@ -260,9 +270,12 @@ def _ask(call, request):
     if reply.stop_reason != "end_turn":
         raise BuildError(f"Claude stopped early ({reply.stop_reason}); nothing saved")
     try:
-        return reply, json.loads(reply.text)
+        answer = json.loads(reply.text)
     except json.JSONDecodeError:
         raise BuildError("Claude's answer wasn't valid JSON; nothing saved")
+    if not isinstance(answer, dict):
+        raise BuildError("Claude's answer wasn't a JSON object; nothing saved")
+    return reply, answer
 
 
 def run_second_opinion(conn, cfg, now, *, force=False, call=None, refresh=None):
@@ -288,7 +301,7 @@ def run_second_opinion(conn, cfg, now, *, force=False, call=None, refresh=None):
     if problems:
         reply2, answer = _ask(call, make_request(packet, cfg, problems, reply.text))
         reply = Reply(reply2.text, reply2.stop_reason, reply.input_tokens + reply2.input_tokens,
-                      reply.output_tokens + reply2.output_tokens)
+                      reply.output_tokens + reply2.output_tokens, reply2.model)
         problems = validate_answer(answer, packet, context, cfg.slot_eligibility)
         if problems:
             raise BuildError("Claude's answer broke the league's rules twice; nothing saved:\n  "
@@ -296,7 +309,7 @@ def run_second_opinion(conn, cfg, now, *, force=False, call=None, refresh=None):
     with conn:
         conn.execute("INSERT INTO second_opinion_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                      (now.strftime("%Y-%m-%dT%H:%M:%SZ"), context["season"], packet["gameweek"],
-                      packet["first_kickoff"], so["model"], json.dumps(answer["xi"]), json.dumps(answer["swaps"]),
+                      packet["first_kickoff"], reply.model or so["model"], json.dumps(answer["xi"]), json.dumps(answer["swaps"]),
                       json.dumps(answer["matchup_notes"]), answer["summary"], reply.input_tokens,
                       reply.output_tokens))
     return f"second opinion: GW{packet['gameweek']} saved ({reply.input_tokens}/{reply.output_tokens} tokens)"

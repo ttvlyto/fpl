@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest import mock
 
@@ -268,6 +269,31 @@ class RunTests(unittest.TestCase):
             with self.assertRaises(BuildError):
                 so.run_second_opinion(self.conn, self.cfg, NOW, call=FakeCall(reply), force=True)
         self.assertEqual(self.rows(), 0)
+
+    def test_json_that_is_not_an_object_raises(self):
+        for text in ("[]", "null", '"text"'):
+            with self.assertRaisesRegex(BuildError, "JSON object"):
+                so.run_second_opinion(self.conn, self.cfg, NOW, call=FakeCall((text, "end_turn")), force=True)
+        self.assertEqual(self.rows(), 0)
+
+    def test_saves_the_model_that_served_the_answer(self):
+        def call(request):
+            return so.Reply(GOOD, "end_turn", 1000, 200, "claude-sonnet-5-5")
+        so.run_second_opinion(self.conn, self.cfg, NOW, call=call)
+        self.assertEqual(self.conn.execute("SELECT model FROM second_opinion_log").fetchone()[0], "claude-sonnet-5-5")
+
+    def test_usage_counts_every_attempt_of_a_fallback(self):
+        ns = SimpleNamespace
+        plain = ns(input_tokens=500, output_tokens=50, iterations=None)
+        self.assertEqual(so._usage(plain, "claude-opus-5-5"), (500, 50, "claude-opus-5-5"))
+        fell_back = ns(input_tokens=520, output_tokens=300, iterations=[
+            ns(type="message", input_tokens=500, output_tokens=40),
+            ns(type="fallback_message", input_tokens=520, output_tokens=300, model="claude-sonnet-5-5")])
+        self.assertEqual(so._usage(fell_back, "claude-opus-5-5"), (1020, 340, "claude-sonnet-5-5"))
+        compacted = ns(input_tokens=500, output_tokens=50, iterations=[
+            ns(type="compaction", input_tokens=9000, output_tokens=900),
+            ns(type="message", input_tokens=500, output_tokens=50)])
+        self.assertEqual(so._usage(compacted, "m"), (500, 50, "m"))
 
     def test_failed_runs_stop_after_two_attempts(self):
         for _ in range(2):

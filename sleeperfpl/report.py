@@ -266,7 +266,7 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     match_card = score_matches(conn, sleeper_season, last_finished) if use_sleeper else []
     club_of = {sid: teams.get(el_by_id[fid]["team_id"]) for sid, fid in match.mapping.items() if fid in el_by_id}
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
-                       {p["player_id"]: p for p in players}, sleeper_season, fodds, club_of, goal_quotes)
+                       {p["player_id"]: p for p in players}, sleeper_season, fodds, club_of, goal_quotes, log)
     target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
     matches = [_match_entry(f, teams, fodds.get(f["fixture_id"]) or all_odds.get(f["fixture_id"]),
                             f["fixture_id"] not in fodds) for f in target]
@@ -469,7 +469,7 @@ def _club_minutes_in(minutes, club_of):
 
 
 def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
-                players_by_id, sleeper_season, fodds, club_of, goal_quotes):
+                players_by_id, sleeper_season, fodds, club_of, goal_quotes, log=True):
     gw = live_gameweek(events, fixtures, now)
     if gw is None:
         return None
@@ -535,7 +535,7 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
                 p = goal_quotes.get((normalize_name(pl.name), pl.club, f["fixture_id"]))
                 if p is not None:
                     odds_rows.append((pl.sleeper_id, f.get("kickoff_time"), p))
-    if odds_rows:
+    if odds_rows and log:
         log_goal_odds(conn, sleeper_season, gw, odds_rows, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
     return {
         "gameweek": gw,
@@ -741,7 +741,8 @@ def _second_opinion_card(r):
         out.append(f'<div class="banner">Roster changes since this opinion: {_e(", ".join(so["changed"]))}</div>')
     out.append(f'<p>{_e(so["summary"])}</p>')
     rows = [f'<tr><td>{_e(x["slot"])}</td><td>{_e(x["name"])}'
-            + ('' if x["in_tool_xi"] else ' <span class="flag">Claude only</span>')
+            + (' <small class="muted">also in tool XI</small>' if x["in_tool_xi"]
+               else ' <span class="flag">Claude only</span>')
             + f'</td><td>{_e(x["reason"])}</td></tr>' for x in so["xi"]]
     out.append('<table><thead><tr><th>Slot</th><th>Player</th><th>Why</th></tr></thead>'
                f'<tbody>{"".join(rows)}</tbody></table>')

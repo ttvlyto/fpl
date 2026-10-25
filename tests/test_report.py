@@ -159,6 +159,7 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Starts every week", page)
         self.assertIn("Chelsea unbeaten in 3", page)
         self.assertIn("Claude only", page)
+        self.assertEqual(page.count("also in tool XI"), 2)
         json.dumps(r)
 
     def test_opinion_for_another_week_is_ignored(self):
@@ -613,6 +614,22 @@ class ReviewFixLiveReportTests(LiveReportTests):
         self.conn.execute("UPDATE sleeper_stats SET stats_json = ? WHERE week = 9", (json.dumps({"min": 0}),))
         after = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
         self.assertEqual(build_report(self.conn, self.cfg, after)["live"]["replacements"], [])
+
+    def test_preview_build_logs_no_matchday_goal_odds(self):
+        from unittest import mock
+        self.conn.execute("INSERT INTO fpl_fixtures VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                          (TS, 51, 9, 2, 1, 3, 4, "2026-10-24T16:30:00Z", 0, None, None))
+        after = datetime(2026, 10, 24, 15, tzinfo=timezone.utc)
+        always = mock.Mock(get=lambda key, default=None: 0.5)
+
+        def logged():
+            return self.conn.execute("SELECT COUNT(*) FROM projection_log WHERE p_goal_market IS NOT NULL").fetchone()[0]
+
+        with mock.patch("sleeperfpl.report._goal_quotes", return_value=always):
+            build_report(self.conn, self.cfg, after, log=False)
+            self.assertEqual(logged(), 0)
+            build_report(self.conn, self.cfg, after)
+            self.assertGreater(logged(), 0)
 
     def test_matchday_builds_even_if_fetches_fail(self):
         from unittest import mock
