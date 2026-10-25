@@ -409,7 +409,9 @@ Details of `report.json` worth knowing:
   `rank_v1`, the v2 and `ep_next` comparisons, `mae_v1m`/`rank_v1m` beside v1 on
   the same players, the same for v2m, and `brier_start`/`brier_app`), `labels`
   (the `label-audit` rows), `decisions` (`set_pts`,
-  `tool_pts`, `best_pts` and swap outcomes), `matches` (`log_loss`, `rps`,
+  `tool_pts`, `best_pts` and swap outcomes, plus `claude_pts` and
+  `claude_swaps` from the last second opinion before kickoff; `claude_pts` is
+  null without one), `matches` (`log_loss`, `rps`,
   `brier_cs`) and `summary` (a string). `weeks`, `decisions` and `matches` keep
   the last 8 entries; `labels` is not trimmed.
 - `matches` entries always have `fixture_id`, `home`, `away`, `kickoff` and

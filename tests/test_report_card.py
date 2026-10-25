@@ -206,6 +206,28 @@ class DecisionTests(unittest.TestCase):
         self.recommend(["b", "c"])
         self.assertAlmostEqual(self.score()[0]["set_pts"], 2)
 
+    def opinion(self, xi, swaps=(), made_at="2026-10-23T19:00:00Z"):
+        self.conn.execute("INSERT INTO second_opinion_log VALUES (?, '2026', 9, ?, 'm', ?, ?, '[]', 's', 1, 1)",
+                          (made_at, KO, json.dumps([{"player_id": p, "slot": "M", "reason": "r"} for p in xi]),
+                           json.dumps([{"drop_id": d, "add_id": a, "reason": "r"} for d, a in swaps])))
+
+    def test_claude_pts_scored_from_last_pre_kickoff_opinion(self):
+        self.roster(["a", "b"])
+        self.recommend(["b", "c"])
+        self.opinion(["c", "d"], [("a", "d")])                       # 8 + 3
+        self.opinion(["a", "b"], made_at="2026-10-24T15:00:00Z")      # after kickoff: ignored
+        d = self.score()[0]
+        self.assertAlmostEqual(d["claude_pts"], 11)
+        self.assertEqual((d["claude_swaps"][0]["drop"], d["claude_swaps"][0]["add"]), ("A", "D"))
+        self.assertAlmostEqual(d["claude_swaps"][0]["diff"], 1)
+
+    def test_claude_pts_none_without_opinion(self):
+        self.roster(["a", "b"])
+        self.recommend(["b", "c"])
+        d = self.score()[0]
+        self.assertIsNone(d["claude_pts"])
+        self.assertEqual(d["claude_swaps"], [])
+
     def test_summary_prefers_decisions(self):
         decisions = [{"gw": 8, "set_pts": 5, "tool_pts": 9}, {"gw": 9, "set_pts": 9, "tool_pts": 5}]
         self.assertEqual(summary([], decisions), "the tool's XI beat your lineup in 1 of 2 weeks")

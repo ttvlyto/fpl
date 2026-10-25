@@ -643,6 +643,7 @@ def _report_card(r):
     rc = r.get("report_card") or {}
     decisions = {d["gw"]: d for d in rc.get("decisions", [])}
     show_xi = bool(decisions)
+    show_claude = any(d.get("claude_pts") is not None for d in decisions.values())
     show_min = any(w.get("n_v1m") for w in rc.get("weeks", []))
     rows = []
     for w in rc.get("weeks", []):
@@ -655,6 +656,9 @@ def _report_card(r):
                        f'<td class="num">{"–" if w.get("brier_start") is None else format(w["brier_start"], ".3f")}'
                        f'</td>')
         xi = "".join(f'<td class="num">{_num(d[k]) if d else "–"}</td>' for k in ("set_pts", "tool_pts", "best_pts"))
+        if show_claude:
+            c = d.get("claude_pts") if d else None
+            xi += f'<td class="num">{"–" if c is None else _num(c)}</td>'
         # v2 next to v1 on the same players only, never v1 over everyone
         v2 = ("–" if w["mae_v2"] is None else
               f'{_num(w["mae_v2"])} / {_num(w.get("mae_v1_paired"))} <small>({w.get("n_v2", 0)})</small>')
@@ -670,6 +674,7 @@ def _report_card(r):
             + ('<th class="num">With minutes (v1m / v1): miss · order</th><th class="num">Start-odds score</th>'
                if show_min else "")
             + ('<th class="num">Your XI</th><th class="num">Tool XI</th><th class="num">Best XI</th>' if show_xi else "")
+            + ('<th class="num">Claude XI (followed in full)</th>' if show_claude else "")
             + '</tr>')
     table = f'<div class="scroll"><table><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table></div>' if rows else ""
     matches = rc.get("matches") or []

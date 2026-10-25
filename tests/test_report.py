@@ -186,6 +186,18 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("<script>x", page)
         self.assertIn("&lt;script&gt;x", page)
 
+    def test_claude_column_only_with_data(self):
+        from sleeperfpl.report import _report_card
+        week = {"gw": 8, "n": 5, "mae_v1": 1.0, "mae_v1_played": 1.0, "mae_v2": None, "rank_v1": None,
+                "brier_goal": None, "n_goal": 0}
+        dec = {"gw": 8, "set_pts": 5, "tool_pts": 6, "best_pts": 9, "swaps": [], "claude_pts": None, "claude_swaps": []}
+        r = {"report_card": {"weeks": [week], "decisions": [dec], "matches": [], "labels": [], "summary": "s"}}
+        self.assertNotIn("Claude", _report_card(r))
+        dec["claude_pts"] = 7
+        html_ = _report_card(r)
+        self.assertIn("Claude XI (followed in full)", html_)
+        self.assertIn('<td class="num">7.0</td>', html_)
+
     def test_week_in_progress_banner(self):
         seed(self.conn)
         self.assertIsNone(build_report(self.conn, self.cfg, NOW)["in_progress"])

@@ -147,6 +147,13 @@ def score_decisions(conn, season, scoring, last_finished, slots, eligibility):
         recs[gw] = (first, roster_id, json.loads(xi_json or "[]"), json.loads(swaps_json or "[]"))
     if not recs:
         return []
+    claude = {}
+    for gw, xi_json, swaps_json in conn.execute(
+            "SELECT gw, xi_json, swaps_json FROM second_opinion_log "
+            "WHERE season = ? AND gw <= ? AND first_kickoff IS NOT NULL AND made_at < first_kickoff "
+            "ORDER BY made_at", (season, last_finished)):
+        claude[gw] = ([x["player_id"] for x in json.loads(xi_json or "[]")],
+                      [(s["drop_id"], s["add_id"]) for s in json.loads(swaps_json or "[]")])
     names, positions = {}, {}
     for r in latest(conn, "sleeper_players"):
         names[r["player_id"]] = r["name"] or r["player_id"]
@@ -172,12 +179,18 @@ def score_decisions(conn, season, scoring, last_finished, slots, eligibility):
             return sleeper_points(stats[pid], scoring) if pid in stats else 0.0
         pool = [PlayerCtx(sleeper_id=pid, name=names.get(pid, pid), positions=positions.get(pid, []), club="",
                           fpl_id=0, proj=pts(pid)) for pid in players if pid not in reserve]
+        def graded(pairs):
+            return [{"drop": names.get(d, d), "add": names.get(a, a), "drop_pts": pts(d),
+                     "add_pts": pts(a), "diff": pts(a) - pts(d)} for d, a in pairs]
+        c_xi, c_swaps = claude.get(gw, (None, []))
         out.append({"gw": gw,
                     "set_pts": sum(pts(pid) for pid in starters if pid in players),
                     "tool_pts": sum(pts(pid) for pid in xi),
                     "best_pts": best_xi(pool, slots, eligibility).total,
-                    "swaps": [{"drop": names.get(d, d), "add": names.get(a, a), "drop_pts": pts(d),
-                               "add_pts": pts(a), "diff": pts(a) - pts(d)} for d, a in swaps]})
+                    "swaps": graded(swaps),
+                    # Claude's XI includes its own adds: the points had you followed it in full.
+                    "claude_pts": None if c_xi is None else sum(pts(pid) for pid in c_xi),
+                    "claude_swaps": graded(c_swaps)})
     return out
 
 
