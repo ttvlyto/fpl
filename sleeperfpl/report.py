@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+from .availability import chance_for, fpl_bucket, is_hard_out, slp_bucket
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
 from .gameweek import MATCH_LENGTH, live_gameweek, season_of, target_gameweek, team_fixtures
@@ -32,9 +33,6 @@ from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sleeper import rostered_ids  # noqa: E402
 
-OUT_STATUSES = {"i", "s", "u", "n"}
-
-
 class BuildError(Exception):
     pass
 
@@ -52,14 +50,16 @@ def _owner_roster(users, rosters, owner):
     return roster
 
 
-def _flag(sp, el):
+def _flag(sp, el, deadline_passed):
     if el is None:
         return "no data"
-    if el["status"] in OUT_STATUSES or el["chance_next"] == 0 or (sp.get("injury_status") or "") == "Out":
+    bucket = fpl_bucket(el["status"], chance_for(el, deadline_passed))
+    if is_hard_out(bucket):
         return "out"
-    if el["status"] == "d":
+    if bucket[0] in "di":
         return "doubtful"
-    return None
+    slp = slp_bucket(sp.get("injury_status"))
+    return f"Sleeper: {slp}" if slp != "none" else None
 
 
 def _history(conn, season, fpl_id, position, rules, max_round=None):
@@ -149,6 +149,9 @@ def build_report(conn, cfg, now):
     season = season_of(events) or "unknown"
     gw = target_gameweek(events, fixtures, now)
     by_team = team_fixtures(fixtures, teams, gw.gw) if gw.gw else {}
+    target_event = next((e for e in events if e["event_id"] == gw.gw), None)
+    deadline = parse_time(target_event["deadline_time"]) if target_event else None
+    deadline_passed = deadline is not None and deadline <= now
     finished = [e["event_id"] for e in events if e["finished"]]
     last_finished = max(finished) if finished else None
     overrides = load_overrides(cfg.overrides_path)
@@ -187,7 +190,7 @@ def build_report(conn, cfg, now):
         club = teams.get(el["team_id"], p["team"]) if el else p["team"]
         pl = PlayerCtx(sleeper_id=sid, name=p["name"] or sid, positions=p["positions"], club=club,
                        fpl_id=fpl_id, on_roster=sid in my_ids, in_reserve=sid in reserve,
-                       flag=_flag(p, el), fixtures=by_team.get(club, []) if el else [],
+                       flag=_flag(p, el, deadline_passed), fixtures=by_team.get(club, []) if el else [],
                        trending_adds=trending.get(sid))
         if el:
             pl.ep_next = el["ep_next"]

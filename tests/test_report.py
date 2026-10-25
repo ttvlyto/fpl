@@ -128,6 +128,41 @@ class ReportTests(unittest.TestCase):
         saka = next(p for p in everyone if p["name"] == "Bukayo Saka")
         self.assertEqual((saka["flag"], saka["proj"]), ("out", 0.0))
 
+    def everyone(self, r):
+        return [s["player"] for s in r["xi"]["starters"] if s["player"]] + r["xi"]["bench"]
+
+    def test_sleeper_out_fpl_available_not_zeroed(self):
+        seed(self.conn)
+        self.conn.execute("UPDATE sleeper_players SET injury_status = 'Out' WHERE player_id = 's3'")
+        r = build_report(self.conn, self.cfg, NOW)
+        rice = next(p for p in self.everyone(r) if p["name"] == "Declan Rice")
+        self.assertEqual(rice["flag"], "Sleeper: out")
+        self.assertGreater(rice["proj"], 0)
+        starters = [s["player"]["name"] for s in r["xi"]["starters"] if s["player"]]
+        self.assertIn("Declan Rice", starters)
+
+    def test_fpl_injured_zero_is_out(self):
+        seed(self.conn)
+        self.conn.execute("UPDATE fpl_elements SET status = 'i', chance_next = 0 WHERE fpl_id = 2")
+        saka = next(p for p in self.everyone(build_report(self.conn, self.cfg, NOW)) if p["name"] == "Bukayo Saka")
+        self.assertEqual((saka["flag"], saka["proj"]), ("out", 0.0))
+        self.conn.execute("UPDATE fpl_elements SET status = 'i', chance_next = 75 WHERE fpl_id = 2")
+        saka = next(p for p in self.everyone(build_report(self.conn, self.cfg, NOW)) if p["name"] == "Bukayo Saka")
+        self.assertEqual(saka["flag"], "doubtful")
+        self.assertGreater(saka["proj"], 0)
+
+    def test_chance_this_used_after_deadline(self):
+        seed(self.conn)
+        self.conn.execute("UPDATE fpl_elements SET status = 'd', chance_next = 0, chance_this = 100 WHERE fpl_id = 2")
+        before = next(p for p in self.everyone(build_report(self.conn, self.cfg, NOW)) if p["name"] == "Bukayo Saka")
+        self.assertEqual(before["flag"], "out")
+        after_deadline = datetime(2026, 10, 24, 10, 30, tzinfo=timezone.utc)   # deadline 10:00, kickoff 11:30
+        r = build_report(self.conn, self.cfg, after_deadline)
+        self.assertEqual(r["gameweek"], 9)
+        saka = next(p for p in self.everyone(r) if p["name"] == "Bukayo Saka")
+        self.assertNotEqual(saka["flag"], "out")
+        self.assertGreater(saka["proj"], 0)
+
     def test_html_escapes_and_labels_waiver(self):
         seed(self.conn, names={"s4": "<b>New</b>"})
         r = build_report(self.conn, self.cfg, NOW)
