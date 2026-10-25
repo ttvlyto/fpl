@@ -549,6 +549,60 @@ class MatchupReportTests(unittest.TestCase):
         self.assertEqual(self.build()["matchup"]["them"]["record"], "4–3")
 
 
+class MatchupPageTests(MatchupReportTests):
+    def test_page_matchup_card(self):
+        self.opp(["s6"])
+        r = self.build()
+        m, page = r["matchup"], render_html(r)
+        self.assertIn("Rivals FC", page)
+        self.assertIn("@rival", page)
+        self.assertIn(f'{m["me"]["total"]:.1f}', page)
+        self.assertIn(f'{m["them"]["total"]:.1f}', page)
+        self.assertTrue(any(t in page for t in ("You lead by", "You trail by", "Level")))
+        self.assertIn(f'With all {len(r["swaps"])} suggested swap', page)
+        self.assertIn(f'{m["after_swaps"]:.1f}', page)
+
+    def test_page_xis_pitch_and_list(self):
+        r = self.build()
+        page = render_html(r)
+        self.assertIn('data-xi-view="pitch"', page)
+        self.assertIn('data-xi-view="list"', page)
+        self.assertIn('class="pitch"', page)
+        self.assertIn(r["matchup"]["them"]["formation"], page)
+        self.assertIn('data-view="list"', page)
+        self.assertNotIn("<h2>Best XI</h2>", page)          # the list view holds it in projected mode
+        self.assertIn("Bukayo Saka", page)
+
+    def test_page_badges_with_fallback(self):
+        self.conn.execute("UPDATE fpl_teams SET code = 3 WHERE short_name = 'ARS'")
+        page = render_html(self.build())
+        self.assertIn("badges/70/t3.png", page)
+        self.assertIn("<b>ARS</b>", page)
+        self.assertIn("<b>CHE</b>", page)
+        self.assertNotIn("tNone", page)
+        self.assertIn('onerror="this.remove()"', page)
+
+    def test_page_has_view_switch_and_local_time_script(self):
+        page = render_html(self.build())
+        self.assertIn("localStorage", page)
+        self.assertIn("'xi-view'", page)
+        self.assertIn("toLocaleString", page)
+        self.assertIn("[hidden]{display:none", page)
+
+    def test_page_notice_only(self):
+        page = render_html(self.build(schedule={"start_gw": 9, "end_gw": 31, "opponents": ["Nobody"]}))
+        self.assertIn("Nobody", page)
+        self.assertNotIn('class="pitch"', page)
+        self.assertIn("<h2>Best XI</h2>", page)
+
+    def test_page_without_schedule_unchanged_sections(self):
+        page = render_html(self.build(schedule=None))
+        for text in ("<h2>Best XI</h2>", "Swap tips", "Top free agents", "<h2>Fixtures</h2>"):
+            self.assertIn(text, page)
+        self.assertNotIn('class="card matchup"', page)
+        self.assertNotIn('class="pitch"', page)
+
+
 from sleeperfpl.pricing import poisson_probs  # noqa: E402
 
 
@@ -598,6 +652,17 @@ class MarketReportTests(unittest.TestCase):
         self.assertGreater(m["p_home"], m["p_away"])
         self.assertEqual(r["markets_unmatched"], [])
 
+    def test_page_fixtures_keep_market_details(self):
+        self.quotes()
+        r = build_report(self.conn, self.cfg, NOW)
+        page = render_html(r)
+        self.assertIn('<time datetime="2026-10-24T11:30:00Z">', page)
+        self.assertIn("xG 1.80", page)
+        self.assertIn("clean sheet", page)
+        self.assertIn("Draw", page)
+        self.assertIn("kalshi", page)
+        self.assertIn("Arsenal", page)
+
     def test_projection_uses_market_when_available(self):
         self.quotes()
         r = build_report(self.conn, self.cfg, NOW)
@@ -639,7 +704,7 @@ class MarketReportTests(unittest.TestCase):
     def test_html_shows_match_card_and_flag(self):
         self.quotes(lh=1.8, la=1.6)
         page = render_html(build_report(self.conn, self.cfg, NOW))
-        self.assertIn("Matches", page)
+        self.assertIn("<h2>Fixtures</h2>", page)
         self.assertIn("⚑", page)
         self.assertIn("mkt", page)
         self.assertIn("Report card", page)
@@ -734,6 +799,15 @@ class LiveMatchupTests(LiveReportTests):
         self.assertIsNone(them[0]["player"])
         self.assertEqual((them[1]["player"]["name"], them[1]["points"]), ("Sleeper player s99", 0.0))
         self.assertIsNone(them[2]["player"])
+
+
+class LiveMatchupPageTests(LiveMatchupTests):
+    def test_page_live_mode(self):
+        page = render_html(build_report(self.conn, self.cfg, self.AFTER))
+        self.assertIn("GW9 · live", page)
+        self.assertIn("to play", page)
+        self.assertIn("<h2>Best XI · GW", page)
+        self.assertIn('class="pitch"', page)
 
 
 class ReviewFixReportMarketTests(MarketReportTests):

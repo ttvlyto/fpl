@@ -20,7 +20,7 @@ from .gameweek import MATCH_LENGTH, live_gameweek, matches_left, season_of, targ
 from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
-from .matchup import find_opponent, formation, live_side, opponent_for, record_text, team_label
+from .matchup import find_opponent, formation, live_side, opponent_for, pitch_row, record_text, team_label
 from .live import unlikely_to_play, zero_minute_replacements
 from .markets import find_fixture, latest_quotes, mid, team_code, usable
 from .minutes import fixture_minutes, history, last_season_start_share, player_minutes, regular_weeks, season_rows
@@ -309,6 +309,7 @@ def build_report(conn, cfg, now, *, log=True, context=None):
         "live": live,
         "matchup": matchup,
         "badges": {t["short_name"]: t.get("code") for t in fpl_teams},
+        "club_names": {t["short_name"]: t["name"] for t in fpl_teams},
         "report_card": {"weeks": [_rounded(w) for w in card[-8:]],
                         "decisions": [_rounded(d) for d in decisions[-8:]],
                         "matches": [_rounded(m) for m in match_card[-8:]],
@@ -682,6 +683,22 @@ small{color:var(--muted)}
 .flag{font-size:12px;color:var(--warn)}
 .tip{background:var(--warnbg);color:var(--warn);border-radius:8px;padding:8px 10px;margin:6px 0}
 .banner{background:var(--warnbg);color:var(--warn);border-radius:8px;padding:8px 10px}
+[hidden]{display:none!important}
+"""
+
+PAGE_JS = """
+(function(){
+var KEY='xi-view';
+function show(v){
+document.querySelectorAll('[data-xi-view]').forEach(function(el){el.hidden=el.getAttribute('data-xi-view')!==v;});
+document.querySelectorAll('[data-view]').forEach(function(b){b.setAttribute('aria-pressed',b.getAttribute('data-view')===v?'true':'false');});}
+var v='pitch';try{v=localStorage.getItem(KEY)||'pitch';}catch(e){}
+show(v==='list'?'list':'pitch');
+document.querySelectorAll('[data-view]').forEach(function(b){b.addEventListener('click',function(){
+var w=b.getAttribute('data-view');show(w);try{localStorage.setItem(KEY,w);}catch(e){}});});
+document.querySelectorAll('time[datetime]').forEach(function(t){var d=new Date(t.getAttribute('datetime'));
+if(!isNaN(d))t.textContent=d.toLocaleString(undefined,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});});
+})();
 """
 
 SORT_JS = """
@@ -893,38 +910,180 @@ def _live_card(r):
     return f'<div class="card"><h2>This week (live) — GW{_e(live["gameweek"])}</h2>{"".join(items)}</div>'
 
 
-def _matches_card(r):
-    rows = []
-    for m in r.get("matches", []):
-        teams = f"{_e(m['home'])} v {_e(m['away'])}"
-        when = _e((m.get("kickoff") or "")[:16].replace("T", " "))
-        if m.get("market") is None:
-            rows.append(f'<tr><td>{teams}</td><td colspan="4" class="muted">no market — using FPL difficulty</td>'
-                        f'<td>{when}</td></tr>')
-            continue
-        age = " · <span class=\"flag\">stale</span>" if m["stale"] else ""
-        rows.append(f'<tr><td>{teams}</td><td class="num">{_pct(m["p_home"])}/{_pct(m["p_draw"])}/{_pct(m["p_away"])}</td>'
-                    f'<td class="num">{m["lam_home"]:.2f}–{m["lam_away"]:.2f}</td>'
-                    f'<td class="num">{_pct(m["cs_home"])}/{_pct(m["cs_away"])}</td>'
-                    f'<td><small>{_e("+".join(m["sources"]))} {_e(m["fetched_at"][5:16].replace("T", " "))}</small>{age}</td>'
-                    f'<td>{when}</td></tr>')
-    if not rows:
-        return ""
-    note = {"market": "Projections use betting-market odds.",
-            "mixed": "Projections use betting odds where a market exists, FPL difficulty elsewhere.",
-            "difficulty": "No usable betting odds: projections use FPL difficulty."}.get(r.get("projection_note"), "")
-    head = ('<tr><th>Match</th><th class="num">Win/Draw/Win</th><th class="num">Exp. goals</th>'
-            '<th class="num">Clean sheet</th><th>Source</th><th>Kickoff (UTC)</th></tr>')
-    return (f'<div class="card"><h2>Matches</h2><div class="scroll"><table><thead>{head}</thead>'
-            f'<tbody>{"".join(rows)}</tbody></table></div><div class="muted" style="margin-top:6px">{_e(note)}</div></div>')
-
-
 HEAD = '<tr><th>Player</th><th>vs</th><th class="num">Avg5</th><th class="num">Proj</th>'
 
 
 def _table(rows_html, extra_head=""):
     return (f'<div class="scroll"><table class="sortable"><thead>{HEAD}{extra_head}</tr></thead>'
             f'<tbody>{"".join(rows_html)}</tbody></table></div>')
+
+
+BADGE_URL = "https://resources.premierleague.com/premierleague/badges/70/t{}.png"
+
+
+def _badge(club, code):
+    """A club badge; the club code underneath shows if the image is missing or fails to load."""
+    img = (f'<img src="{BADGE_URL.format(int(code))}" alt="" loading="lazy" onerror="this.remove()">'
+           if code is not None else "")
+    return f'<span class="badge">{img}<b>{_e(club)}</b></span>'
+
+
+def _best_xi_card(r, title):
+    return f'<div class="card"><h2>{_e(title)}</h2>{_best_xi_tables(r)}</div>'
+
+
+def _best_xi_tables(r):
+    rows = []
+    for s in r["xi"]["starters"]:
+        if s["player"]:
+            rows.append(f'<tr>{_player_cells(s["player"])}<td>{_e(s["slot"])}</td></tr>')
+        else:
+            rows.append(f'<tr><td colspan="4" class="flag">No eligible player</td><td>{_e(s["slot"])}</td></tr>')
+    out = [_table(rows, "<th>Slot</th>")]
+    if r["xi"]["bench"]:
+        out.append(f'<h3>Bench</h3>{_table([f"<tr>{_player_cells(p)}</tr>" for p in r["xi"]["bench"]])}')
+    out.append('<div class="muted" style="margin-top:6px">Opponent in CAPS = home, lower case = away. '
+               'Green = easy, grey = average, red = hard. Avg5 (n) = average league points over the last n matches played.</div>')
+    return "".join(out)
+
+
+def _lead(diff):
+    if round(diff, 1) == 0:
+        return "Level"
+    return f'You {"lead" if diff > 0 else "trail"} by {_num(abs(diff))}'
+
+
+def _matchup_card(r):
+    m = r.get("matchup")
+    if not m:
+        return ""
+    if m["notice"]:
+        return f'<div class="card banner">{_e(m["notice"])}</div>'
+    me, them, live = m["me"], m["them"], m["mode"] == "live"
+
+    def team(side, cls, align):
+        extra = f' · {side["to_play"]} to play' if live else ""
+        return (f'<div style="text-align:{align}"><div class="tname {cls}">{_e(side["name"])}</div>'
+                f'<div class="muted">{_e(side["record"])} · @{_e(side["username"] or "")}{extra}</div></div>')
+
+    pos = max(me["total"], 0) + max(them["total"], 0)
+    share = 50 if pos <= 0 else round(100 * max(me["total"], 0) / pos)
+    head = f'GW{_e(m["gw"])} · live' if live else f'GW{_e(m["gw"])} matchup'
+    sub = "points so far, lineups as set in Sleeper" if live else "projected, best lineups"
+    out = [f'<div class="card matchup"><div class="eyebrow">{head}</div><div class="teams">',
+           team(me, "me", "left"),
+           f'<div><div class="score">{_num(me["total"])} <span class="muted">–</span> {_num(them["total"])}</div>'
+           f'<div class="muted" style="text-align:center">{sub}</div></div>',
+           team(them, "them", "right"), '</div>',
+           f'<div class="bar" role="img" aria-label="{_e(_lead(me["total"] - them["total"]))}">'
+           f'<div class="me" style="width:{share}%"></div><div class="them" style="width:{100 - share}%"></div></div>']
+    line = _lead(me["total"] - them["total"]) + ("." if live else " as things stand.")
+    if not live and m["after_swaps"] is not None:
+        n = len(r["swaps"])
+        after = m["after_swaps"] - them["total"]
+        line += (f' With all {n} suggested swap{"s" if n != 1 else ""} your XI projects <b>{_num(m["after_swaps"])}</b>'
+                 f', {"ahead" if after > 0 else "behind" if after < 0 else "level"}'
+                 + (f' by {_num(abs(after))}' if round(after, 1) else "") + ".")
+    out.append(f'<div class="callout">{line}</div></div>')
+    return "".join(out)
+
+
+def _chip(s, badges, live):
+    p = s["player"]
+    if p is None:
+        return f'<div class="chip"><span class="badge empty"></span><span class="pn">{_e(s["slot"])}</span></div>'
+    short = p["name"].split()[-1] if (p["name"] or "").split() else ""
+    pts = _num(s["points"] if live else p["proj"])
+    later = " later" if live and s["state"] == "to_play" else ""
+    title = f' title="{_e(p["name"])}{" · to play" if later else ""}"'
+    return (f'<div class="chip{later}"{title}>{_badge(p["club"], badges.get(p["club"]))}'
+            f'<span class="pn">{_e(short)}</span><span class="pp">{pts}</span></div>')
+
+
+def _pitch(side, cls, badges, live):
+    rows = [[], [], [], []]
+    for s in side["starters"]:
+        rows[pitch_row(s["player"]["positions"] if s["player"] else [s["slot"]])].append(_chip(s, badges, live))
+    body = "".join(f'<div class="prow">{"".join(row)}</div>' for row in rows if row)
+    return (f'<div><div class="side-head"><b class="{cls}">{_e(side["name"])}</b>'
+            f'<span class="muted">{_e(side["formation"])} · <b>{_num(side["total"])}</b> pts</span></div>'
+            f'<div class="pitch">{body}</div></div>')
+
+
+def _side_table(side, cls, badges, live):
+    head = "Pts" if live else "Proj"
+    rows = []
+    for s in side["starters"]:
+        p = s["player"]
+        if p is None:
+            rows.append(f'<tr><td>{_e(s["slot"])}</td><td class="muted">empty</td><td></td></tr>')
+            continue
+        pts = _num(s["points"] if live else p["proj"])
+        state = f' <small>{"to play" if s["state"] == "to_play" else _e(s["state"] or "")}</small>' if live else ""
+        rows.append(f'<tr><td>{_e(s["slot"])}</td><td>{_badge(p["club"], badges.get(p["club"]))} {_e(p["name"])}</td>'
+                    f'<td class="num"><b>{pts}</b>{state}</td></tr>')
+    for p in side.get("bench") or []:
+        rows.append(f'<tr class="bench"><td>BN</td><td>{_badge(p["club"], badges.get(p["club"]))} {_e(p["name"])}</td>'
+                    f'<td class="num">{_num(p["proj"])}</td></tr>')
+    return (f'<div><div class="side-head"><b class="{cls}">{_e(side["name"])}</b>'
+            f'<span class="muted"><b>{_num(side["total"])}</b> pts</span></div><div class="scroll"><table>'
+            f'<thead><tr><th>Slot</th><th>Player</th><th class="num">{head}</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div></div>')
+
+
+def _xis_card(r):
+    m = r.get("matchup")
+    if not m or not m["me"]:
+        return _best_xi_card(r, "Best XI")
+    live, badges = m["mode"] == "live", r.get("badges") or {}
+    pitches = _pitch(m["me"], "me", badges, live) + _pitch(m["them"], "them", badges, live)
+    mine = (_side_table(m["me"], "me", badges, live) if live
+            else f'<div><div class="side-head"><b class="me">{_e(m["me"]["name"])}</b>'
+                 f'<span class="muted"><b>{_num(m["me"]["total"])}</b> pts</span></div>{_best_xi_tables(r)}</div>')
+    lists = mine + _side_table(m["them"], "them", badges, live)
+    switch = ('<div class="seg" role="group" aria-label="Lineup view">'
+              '<button type="button" data-view="pitch" aria-pressed="true">Pitch</button>'
+              '<button type="button" data-view="list" aria-pressed="false">List</button></div>')
+    out = (f'<div class="card"><div class="card-head"><h2>Starting XIs · GW{_e(m["gw"])}</h2>{switch}</div>'
+           f'<div class="sides" data-xi-view="pitch">{pitches}</div>'
+           f'<div class="sides" data-xi-view="list" hidden>{lists}</div></div>')
+    if live:
+        out += _best_xi_card(r, f'Best XI · GW{r["gameweek"] or "–"}')
+    return out
+
+
+def _fixtures_card(r):
+    badges, names = r.get("badges") or {}, r.get("club_names") or {}
+    rows = []
+    for m in r.get("matches", []):
+        k = m.get("kickoff") or ""
+        when = f'<time datetime="{_e(k)}">{_e(k[:16].replace("T", " "))} UTC</time>' if k else "–"
+        priced = m.get("market") is not None
+
+        def team(code, p):
+            pct = f'<span class="pc">{_pct(p)}</span>' if priced else ""
+            return (f'<div class="fx-team">{_badge(code, badges.get(code))}'
+                    f'<span class="nm">{_e(names.get(code) or code)}</span>{pct}</div>')
+
+        counts = "".join(f'<span class="cnt {cls}">{label} {n}</span>'
+                         for cls, label, n in (("me", "You", m.get("mine")), ("them", "Them", m.get("theirs"))) if n)
+        if priced:
+            stale = ' · <span class="flag">stale</span>' if m["stale"] else ""
+            detail = (f'Draw {_pct(m["p_draw"])} · xG {m["lam_home"]:.2f}–{m["lam_away"]:.2f} · '
+                      f'clean sheet {_pct(m["cs_home"])}/{_pct(m["cs_away"])} · '
+                      f'{_e("+".join(m["sources"]))} {_e(m["fetched_at"][5:16].replace("T", " "))}{stale}')
+        else:
+            detail = "no market — using FPL difficulty"
+        rows.append(f'<div class="fx-row"><div class="when">{when}</div>'
+                    f'<div>{team(m["home"], m.get("p_home"))}{team(m["away"], m.get("p_away"))}</div>'
+                    f'<div class="cnts">{counts}</div><div class="fx-detail">{detail}</div></div>')
+    if not rows:
+        return ""
+    note = {"market": "Projections use betting-market odds.",
+            "mixed": "Projections use betting odds where a market exists, FPL difficulty elsewhere.",
+            "difficulty": "No usable betting odds: projections use FPL difficulty."}.get(r.get("projection_note"), "")
+    return (f'<div class="card"><h2>Fixtures</h2><div class="muted">Win chances from the betting markets; '
+            f'times in your time zone.</div>{"".join(rows)}<div class="muted" style="margin-top:6px">{_e(note)}</div></div>')
 
 
 def render_html(report):
@@ -952,23 +1111,11 @@ def render_html(report):
                      f'stat and are left out: {_e(", ".join(r["coverage"]["missing"]))}. Edit scoring_map.json to map them.</div>')
 
     parts.append(_live_card(r))
-    parts.append(_matches_card(r))
+    parts.append(_matchup_card(r))
     if r["coverage"].get("changed"):
         parts.append(f'<div class="card banner">League points changed for: {_e(", ".join(r["coverage"]["changed"]))}. '
                      f'Update those rules in scoring_map.json.</div>')
-
-    rows = []
-    for s in r["xi"]["starters"]:
-        if s["player"]:
-            rows.append(f'<tr>{_player_cells(s["player"])}<td>{_e(s["slot"])}</td></tr>')
-        else:
-            rows.append(f'<tr><td colspan="4" class="flag">No eligible player</td><td>{_e(s["slot"])}</td></tr>')
-    xi = [f'<div class="card"><h2>Best XI</h2>{_table(rows, "<th>Slot</th>")}']
-    if r["xi"]["bench"]:
-        xi.append(f'<h2 style="margin-top:12px">Bench</h2>{_table([f"<tr>{_player_cells(p)}</tr>" for p in r["xi"]["bench"]])}')
-    xi.append('<div class="muted" style="margin-top:6px">Opponent in CAPS = home, lower case = away. '
-              'Green = easy, grey = average, red = hard. Avg5 (n) = average league points over the last n matches played.</div></div>')
-    parts.append("".join(xi))
+    parts.append(_xis_card(r))
 
     tips = []
     for s in r["swaps"]:
@@ -977,6 +1124,7 @@ def render_html(report):
         tips.append(f'<div class="tip">{prefix}Drop {_e(s["drop"]["name"])}, add {_e(s["add"]["name"])}: '
                     f'+{_num(s["gain"])} {what}</div>')
     parts.append(f'<div class="card"><h2>Swap tips</h2>{"".join(tips) or "<div class=muted>No swap clears the threshold this week.</div>"}</div>')
+    parts.append(_fixtures_card(r))
     parts.append(_second_opinion_card(r))
 
     fa = ['<div class="card"><h2>Top free agents</h2>']
@@ -1001,7 +1149,7 @@ def render_html(report):
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1">'
             f'<title>GW{_e(r["gameweek"] or "")} lineup</title><style>{CSS}</style></head>'
-            f'<body><main>{body}</main><script>{SORT_JS}</script></body></html>')
+            f'<body><main>{body}</main><script>{SORT_JS}{PAGE_JS}</script></body></html>')
 
 
 def _atomic_write(path, text):
