@@ -34,6 +34,10 @@ class ProjectionV2Tests(unittest.TestCase):
         inp = V2Inputs(att_avg=0, other_avg=0, p60=0.5, cs_points=8, ga_points=0, n=4)
         self.assertAlmostEqual(project_v2(inp, 1.0, 1.0, 1.35), 4 * math.exp(-1.0))
 
+    def test_project_v2_never_negative(self):
+        inp = V2Inputs(att_avg=0, other_avg=-1.0, p60=0.0, cs_points=6, ga_points=-2, n=2)
+        self.assertEqual(project_v2(inp, 0.8, 2.5, 1.35), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -61,3 +65,8 @@ class V2mTests(unittest.TestCase):
         self.assertAlmostEqual(project_v2m(m, full, 1.35, 0.5, 1.35), v2)
         half = FixtureMinutes([(45, 1.0)], 1.0, 0.0, 45.0)
         self.assertAlmostEqual(project_v2m(m, half, 1.35, 0.5, 1.35), -2 * 0.5 * 0.5 + 0.5 + 1.5)
+
+    def test_project_v2m_never_negative(self):
+        full = FixtureMinutes([(90, 1.0)], 1.0, 1.0, 90.0)
+        m = V2mInputs(att90=0.0, other90=-1.0, cs_points=6, ga_points=-2)
+        self.assertEqual(project_v2m(m, full, 0.8, 2.5, 1.35), 0.0)

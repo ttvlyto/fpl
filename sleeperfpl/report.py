@@ -373,7 +373,7 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
                 parts.append(project_v2(inp, own, opp, baseline.get(pl.club, cfg.league_avg_goals)))
                 used = True
             else:  # no usable market for this fixture: v1 for it
-                parts.append((pl.avg or 0.0) * cfg.difficulty_multipliers[f.difficulty])
+                parts.append(max(0.0, (pl.avg or 0.0) * cfg.difficulty_multipliers[f.difficulty]))
         if used:
             pl.proj, pl.proj_source = sum(parts), "market"
             pl.proj_v2 = pl.proj

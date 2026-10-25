@@ -5,3 +5,4 @@ site/
 config.json
 scoring_map.json.bak
 .claude
+.venv/

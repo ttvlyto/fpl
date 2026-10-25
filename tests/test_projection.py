@@ -36,6 +36,10 @@ class ProjectionTests(unittest.TestCase):
     def test_custom_window(self):
         self.assertEqual(project([10, 0, 0], [3], False, M, window=1).avg, 10.0)
 
+    def test_negative_average_projects_zero(self):
+        p = project([-2, -1], [3], False, M)
+        self.assertEqual((p.avg, p.proj), (-1.5, 0.0))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -76,6 +80,10 @@ class MinutesProjectionTests(unittest.TestCase):
         self.assertEqual(project_minutes(9, 6, [], []), 0.0)
         one = project_minutes(9, 6, [f], [1.0])
         self.assertAlmostEqual(project_minutes(9, 6, [f, f], [1.2, 0.8]), 2 * one)
+
+    def test_project_minutes_never_negative(self):
+        f = self.fm([(90, 1.0)])
+        self.assertEqual(project_minutes(-3, 0, [f], [1.0]), 0.0)
 
     def test_position_rates_pool_by_position(self):
         rates = PositionRates({**self.SC, "pos_f_g": 9})

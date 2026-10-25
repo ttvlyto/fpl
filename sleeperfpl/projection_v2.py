@@ -69,10 +69,10 @@ def v2_inputs(weeks, scoring, prefix, window):
 
 
 def project_v2(inp, own_lam, opp_lam, team_baseline):
-    """Projected league points for one fixture."""
+    """Projected league points for one fixture, at least 0 (as projection.project)."""
     defensive = inp.cs_points * math.exp(-opp_lam) * inp.p60 + inp.ga_points * opp_lam
     attacking = inp.att_avg * (own_lam / team_baseline)
-    return defensive + attacking + inp.other_avg
+    return max(0.0, defensive + attacking + inp.other_avg)
 
 
 def v2m_inputs(weeks, scoring, prefix, window, prior=(0.0, 0.0), k=0.0):
@@ -90,7 +90,7 @@ def v2m_inputs(weeks, scoring, prefix, window, prior=(0.0, 0.0), k=0.0):
 
 
 def project_v2m(inp, fm, own_lam, opp_lam, team_baseline):
-    """v2 for one fixture with minutes: clean sheets need 60+, everything else scales with minutes."""
+    """v2 for one fixture with minutes: clean sheets need 60+, everything else scales with minutes. At least 0."""
     share = fm.e_min / 90
     defensive = inp.cs_points * math.exp(-opp_lam) * fm.p60 + inp.ga_points * opp_lam * share
-    return defensive + inp.att90 * share * (own_lam / team_baseline) + inp.other90 * share
+    return max(0.0, defensive + inp.att90 * share * (own_lam / team_baseline) + inp.other90 * share)

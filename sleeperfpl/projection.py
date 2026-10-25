@@ -23,12 +23,14 @@ class Projection:
 
 def project(history, difficulties, ruled_out, multipliers, window=5):
     """`history`: league points for matches with minutes > 0, most recent first.
-    `difficulties`: one entry per fixture this game week (empty = blank, two = double)."""
+    `difficulties`: one entry per fixture this game week (empty = blank, two = double).
+    Each fixture projects at least 0: a negative recent average is mostly small-sample noise
+    (the 2025 and 2026 backtests miss less with the floor, player order unchanged)."""
     recent = list(history[:window])
     avg = sum(recent) / len(recent) if recent else None
     if ruled_out or avg is None or not difficulties:
         return Projection(avg, len(recent), 0.0)
-    return Projection(avg, len(recent), sum(avg * multipliers[d] for d in difficulties))
+    return Projection(avg, len(recent), sum(max(0.0, avg * multipliers[d]) for d in difficulties))
 
 
 _warned = set()
@@ -108,5 +110,6 @@ def project_minutes(lin90, cs60, fixtures, multipliers):
     """v1m: one FixtureMinutes and one difficulty multiplier per fixture this game week."""
     total = 0.0
     for fm, mult in zip(fixtures, multipliers):
-        total += mult * sum(p * (lin90 * m / 90 + (cs60 if m >= 60 else 0.0)) for m, p in fm.scenarios if m > 0)
+        total += max(0.0, mult * sum(p * (lin90 * m / 90 + (cs60 if m >= 60 else 0.0))
+                                     for m, p in fm.scenarios if m > 0))
     return total

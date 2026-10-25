@@ -164,6 +164,15 @@ immediately.
 - Market-adjusted projections need Sleeper stats. With `stats_source: "fpl"`
   (or the fallback below) every projection uses the difficulty method.
 - The in-progress game week is excluded from the recent average.
+- Every projection is at least 0 per match. A negative recent average is
+  mostly small-sample noise; the 2025 and 2026 backtests miss less with this
+  floor and order players the same.
+- Teammates in the same match can move in opposite directions from the
+  hover number. The market method swaps each player's own clean-sheet and
+  goals-against history for the same market expectation, so a defender
+  whose last few matches were unusually good at the back drops and one whose
+  matches went badly rises. That is intended: defensive luck doesn't carry
+  over.
 
 Builds that use Sleeper stats and have a target game week log their
 projections. After a game week finishes, the report card compares each
