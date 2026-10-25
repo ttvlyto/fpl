@@ -38,6 +38,11 @@ CREATE TABLE IF NOT EXISTS sleeper_stats (
     PRIMARY KEY (season, week, player_id)
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+-- Past Premier League results (football-data.co.uk); season is the start year, teams are FPL names.
+CREATE TABLE IF NOT EXISTS match_results (
+    season TEXT, date TEXT, home TEXT, away TEXT, home_goals INTEGER, away_goals INTEGER,
+    PRIMARY KEY (season, date, home, away)
+);
 -- Fitted start models; the newest version is used.
 CREATE TABLE IF NOT EXISTS minutes_model (
     version TEXT PRIMARY KEY, fitted_at TEXT, n_rows INTEGER, trained_on TEXT, model_json TEXT,
@@ -72,7 +77,7 @@ LOG_TABLES = {
 }
 
 TABLES = set(SNAPSHOT_TABLES) | set(LOG_TABLES) | {"fpl_history", "sleeper_stats", "meta", "minutes_model",
-                                                    "label_counts"}
+                                                    "label_counts", "match_results"}
 
 
 def now_iso():

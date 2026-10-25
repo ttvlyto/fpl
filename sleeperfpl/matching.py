@@ -38,7 +38,7 @@ def load_overrides(path):
     try:
         raw = json.loads(path.read_text())
     except FileNotFoundError:
-        return {"players": {}, "clubs": {}, "market_teams": {}}
+        return {"players": {}, "clubs": {}, "market_teams": {}, "results_teams": {}}
     except json.JSONDecodeError as e:
         raise ConfigError(f"Invalid JSON in {path}: {e}")
     try:
@@ -47,7 +47,8 @@ def load_overrides(path):
         return {"players": {str(k): int(v) for k, v in (raw.get("players") or {}).items()},
                 "clubs": {str(k): str(v) for k, v in (raw.get("clubs") or {}).items()},
                 "market_teams": {str(k).lower().split(":")[0] + ":" + str(k).split(":", 1)[-1].upper(): str(v)
-                                 for k, v in (raw.get("market_teams") or {}).items()}}
+                                 for k, v in (raw.get("market_teams") or {}).items()},
+                "results_teams": {str(k): str(v) for k, v in (raw.get("results_teams") or {}).items()}}
     except (TypeError, ValueError, AttributeError) as e:
         raise ConfigError(f"Bad overrides in {path}: {e} "
                           '(expected {"players": {"<sleeper id>": <fpl id>}, "clubs": {"<code>": "<FPL code>"}})')

@@ -14,6 +14,34 @@ class FetchError(Exception):
     pass
 
 
+def get_text(url, *, retries=3, timeout=120):
+    """Return the body of `url` as text (UTF-8, BOM stripped; latin-1 if it isn't UTF-8).
+
+    Same retry rules as get_json.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    last_err = None
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read()
+            try:
+                return raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                return raw.decode("latin-1")
+        except urllib.error.HTTPError as e:
+            last_err = f"HTTP {e.code} from {url}"
+            if e.code != 429 and e.code < 500:
+                break
+        except urllib.error.URLError as e:
+            last_err = f"Could not reach {url}: {e.reason}"
+        except (OSError, http.client.HTTPException) as e:
+            last_err = f"Error reading {url}: {e}"
+        if attempt < retries:
+            time.sleep(2 ** attempt)
+    raise FetchError(last_err)
+
+
 def get_json(url, *, retries=3, timeout=120, min_interval=0.0):
     """Return parsed JSON from `url`.
 

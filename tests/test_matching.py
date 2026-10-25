@@ -71,12 +71,19 @@ class MatchingTests(unittest.TestCase):
 
     def test_load_overrides_missing_and_bad(self):
         with tempfile.TemporaryDirectory() as d:
-            self.assertEqual(load_overrides(Path(d) / "nope.json"), {"players": {}, "clubs": {}, "market_teams": {}})
+            self.assertEqual(load_overrides(Path(d) / "nope.json"), {"players": {}, "clubs": {}, "market_teams": {},
+                                                                      "results_teams": {}})
             bad = Path(d) / "o.json"
             bad.write_text("{oops")
             with self.assertRaisesRegex(ConfigError, "o.json"):
                 load_overrides(bad)
 
+
+    def test_load_overrides_results_teams(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "o.json"
+            p.write_text('{"results_teams": {"Spurs FC": "Spurs"}}')
+            self.assertEqual(load_overrides(p)["results_teams"], {"Spurs FC": "Spurs"})
 
     def test_load_overrides_bad_value(self):
         with tempfile.TemporaryDirectory() as d:

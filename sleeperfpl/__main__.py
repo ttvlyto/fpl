@@ -12,11 +12,13 @@ from .config import ConfigError, load_config
 from .db import connect, latest
 from .fetch_fpl import fetch_bootstrap, fetch_fixtures, fetch_history
 from .fetch_markets import fetch_kalshi, fetch_polymarket
+from .fetch_results import fetch_results
 from .gameweek import live_gameweek, matchday_due
 from .minutes import regular_weeks, season_rows
 from .minutes_fit import fit_model, holdout_brier, last_fit_key, pos_of_players, save_model, training_rows
 from .fetch_sleeper import fetch_league, fetch_players, fetch_rosters, fetch_trending
 from .http import FetchError
+from .matching import load_overrides
 from .report import BuildError, build_report, write_outputs
 from .sleeper_stats import fetch_sleeper_stats
 from .scoring_map import (coverage, ensure_scoring_map, league_drift, load_scoring_map, probe_sleeper_stats,
@@ -71,6 +73,16 @@ def cmd_fetch_history(cfg, conn, args):
     # FPL history stays as the backup source (stats_source "fpl", or no Sleeper stats).
     n = fetch_history(conn, force=args.force, interval=cfg.fpl_request_interval)
     print(f"fpl history: {n} players fetched" if n else "fpl history: up to date (use --force to refetch)")
+
+
+RESULTS_FROM = 2010
+
+
+def cmd_fetch_results(cfg, conn, args):
+    # Past seasons only: this season's results come from the FPL fixtures already stored.
+    last = int(_league(conn).get("season") or 0) - 1
+    n = fetch_results(conn, args.from_season, last, load_overrides(cfg.overrides_path), force=args.force)
+    print(f"results: {n} season(s) fetched")
 
 
 def cmd_coverage(cfg, conn, args):
@@ -194,6 +206,7 @@ COMMANDS = {
     "fetch-rosters": (cmd_fetch_rosters, "rosters + trending adds"),
     "fetch-status": (cmd_fetch_status, "FPL bootstrap only: injury flags and chances"),
     "fetch-history": (cmd_fetch_history, "Sleeper weekly stats + FPL match history (after a game week finishes)"),
+    "fetch-results": (cmd_fetch_results, "past Premier League results (football-data.co.uk) for head-to-heads"),
     "coverage": (cmd_coverage, "how much of the league's scoring FPL covers"),
     "fetch-markets": (cmd_fetch_markets, "Kalshi + Polymarket match odds"),
     "matchday": (cmd_matchday, "before kickoffs / after matches: odds, player markets, live stats, rebuild"),
@@ -222,6 +235,10 @@ def main(argv=None):
         if name == "fetch-history":
             p.add_argument("--force", action="store_true", help="refetch even if no new game week finished")
             p.add_argument("--season", help="fetch a past season's Sleeper stats (e.g. 2025), for backtest")
+        if name == "fetch-results":
+            p.add_argument("--from", dest="from_season", type=int, default=RESULTS_FROM,
+                           help=f"first season's start year (default {RESULTS_FROM})")
+            p.add_argument("--force", action="store_true", help="refetch seasons already stored")
     args = ap.parse_args(argv)
 
     try:
