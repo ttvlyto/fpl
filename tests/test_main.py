@@ -21,5 +21,16 @@ class FetchStatusTests(unittest.TestCase):
             self.assertIn("fpl players: 7", out.getvalue())
 
 
+
+class CrontabTests(unittest.TestCase):
+    def test_fetch_status_never_shares_a_minute_with_matchday(self):
+        lines = [l for l in (Path(__file__).parent.parent / "deploy" / "crontab.example").read_text().splitlines()
+                 if l and not l.startswith("#")]
+        status = [l.split()[0] for l in lines if "fetch-status" in l]
+        self.assertTrue(status)
+        for minute in status:
+            self.assertNotIn(minute, ("0", "30", "*/30"))   # matchday runs at :00 and :30 under the same lock
+
+
 if __name__ == "__main__":
     unittest.main()

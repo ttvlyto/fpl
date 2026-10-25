@@ -7,6 +7,7 @@ player with at least 3 earlier weeks this season who played in one of his last
 
 import json
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -243,7 +244,10 @@ def load_model(conn):
     """Newest fitted model, else the default shipped beside this module, else None."""
     row = conn.execute("SELECT model_json FROM minutes_model ORDER BY fitted_at DESC, version DESC LIMIT 1").fetchone()
     if row:
-        return MinutesModel.from_dict(json.loads(row[0]))
+        try:
+            return MinutesModel.from_dict(json.loads(row[0]))
+        except (ValueError, TypeError):
+            sys.stderr.write("warning: stored minutes model unreadable; using the shipped default\n")
     return load_default()
 
 

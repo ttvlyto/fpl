@@ -18,9 +18,10 @@
 0 12-23 * * 4 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-rosters ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
 # Every 4 hours, and hourly on Thursday and Friday afternoons (press conferences):
-# FPL injury flags and chances, which the minutes model's labels read
-30 */4 * * *  cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-status ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
-30 12-23 * * 4,5 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-status ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+# FPL injury flags and chances, which the minutes model's labels read. At :45 so it never
+# shares a minute (and the lock) with matchday's :00/:30 runs.
+45 */4 * * *  cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-status ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+45 12-23 * * 4,5 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-status ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
 # Every 2 hours: Kalshi + Polymarket match odds
 15 */2 * * *  cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-markets; python3 -m sleeperfpl build' >> data/cron.log 2>&1

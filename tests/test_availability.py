@@ -122,6 +122,17 @@ class LearningTests(unittest.TestCase):
         rebuild_label_counts(self.conn, "2026", 8, "now")
         self.assertEqual(load_counts(self.conn, "2026"), {})
 
+    def test_hard_out_rows_not_in_sleeper_cells(self):
+        self.log("a", fb="i0", p_fpl=0.0)
+        self.log("b", fb="d75", p_fpl=0.5)
+        self.stats("a", {"min": 90, "gs": 1})
+        self.stats("b", {"min": 0})
+        rebuild_label_counts(self.conn, "2026", 8, "now")
+        c = load_counts(self.conn, "2026")
+        self.assertEqual(c[("fpl", "i0")]["n"], 1)                 # still shown in the audit
+        self.assertEqual(c[("sleeper", "flagged+out")]["n"], 1)    # only the d75 player
+        self.assertEqual(c[("sleeper", "flagged+out")]["starts"], 0)
+
     def test_learned_rr(self):
         t = LabelTable({("sleeper", "a100+out"): {"n": 40, "starts": 10, "apps": 10, "sixty": 8, "e_start": 10.0,
                                                   "e_app": 10.0}}, k=20)

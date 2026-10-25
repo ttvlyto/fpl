@@ -156,7 +156,10 @@ def rebuild_label_counts(conn, season, last_finished, built_at):
         st = rows[gw].get(sid) or {}
         minutes = st.get("min") or 0
         outcome = ((st.get("gs") or 0) >= 1, minutes > 0, minutes >= 60)
-        for key, e in ((("fpl", fb), (psm, pam)), (("sleeper", f"{fpl_side(fb)}+{sb}"), (psf or 0.0, paf or 0.0))):
+        cells_for = [(("fpl", fb), (psm, pam))]
+        if not is_hard_out(fb):   # a hard-out player was zeroed before Sleeper's label: nothing to learn about it
+            cells_for.append((("sleeper", f"{fpl_side(fb)}+{sb}"), (psf or 0.0, paf or 0.0)))
+        for key, e in cells_for:
             c = cells.setdefault(key, {"n": 0, "starts": 0, "apps": 0, "sixty": 0, "e_start": 0.0, "e_app": 0.0})
             c["n"] += 1
             c["starts"] += outcome[0]

@@ -105,6 +105,15 @@ class FitTests(unittest.TestCase):
                 minutes_fit.save_model(conn, m, "2025:20", None)
                 self.assertEqual(load_model(conn).version, m.version)
 
+    def test_load_model_survives_bad_db_row(self):
+        conn = connect(":memory:")
+        conn.execute("INSERT INTO minutes_model VALUES ('v', 't', 1, 'k', ?, NULL)",
+                     (json.dumps({"version": "v", "unknown_field": 1}),))
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "coef.json"
+            with mock.patch.object(minutes_fit, "DEFAULT_PATH", path):
+                self.assertIsNone(load_model(conn))           # no crash; no default either
+
 
 class FitCliTests(unittest.TestCase):
     def test_fit_minutes_skips_when_unchanged(self):

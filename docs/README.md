@@ -288,7 +288,7 @@ season for the same reason).
    - `fetch-history` daily at 03:30 (the FPL crawl is skipped unless a game
      week has finished, but the Sleeper stats step runs every time);
    - `fetch-rosters` every 4 hours, and hourly 12:00–23:00 on Thursdays;
-   - `fetch-status` every 4 hours at :30, and hourly 12:30–23:30 on Thursdays
+   - `fetch-status` every 4 hours at :45, and hourly 12:45–23:45 on Thursdays
      and Fridays (press conferences);
    - `fit-minutes` after `fetch-history` (skips itself when no new week is
      stored);
