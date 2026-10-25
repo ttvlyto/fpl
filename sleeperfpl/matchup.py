@@ -36,3 +36,26 @@ def find_opponent(name, users, rosters, my_roster_id):
     if roster["roster_id"] == my_roster_id:
         return None, f'Schedule opponent "{name}" is you; check the schedule in config.json'
     return roster, None
+
+
+_ROWS = {"F": 0, "FWD": 0, "M": 1, "MID": 1, "D": 2, "DEF": 2, "GK": 3}
+
+
+def pitch_row(positions):
+    """Pitch row for a player, by his first listed position: 0 forwards (top) … 3 goalkeeper."""
+    return _ROWS.get(positions[0] if positions else "", 1)
+
+
+def formation(position_lists):
+    """Defenders-midfielders-forwards, e.g. "3-5-2" (goalkeepers not counted)."""
+    rows = [pitch_row(p) for p in position_lists]
+    return "-".join(str(rows.count(r)) for r in (2, 1, 0))
+
+
+def record_text(roster):
+    """ "4–3", "4–3–1" with ties, or "–" before the record is stored."""
+    wins = roster.get("wins")
+    if wins is None:
+        return "–"
+    ties = roster.get("ties") or 0
+    return f"{wins}–{roster.get('losses') or 0}" + (f"–{ties}" if ties else "")

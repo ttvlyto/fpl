@@ -451,6 +451,104 @@ class SleeperSourceReportTests(unittest.TestCase):
         self.assertIn("🔒", page)
 
 
+from sleeperfpl.lineup import best_xi  # noqa: E402
+
+SCHED = {"start_gw": 9, "end_gw": 31, "opponents": ["Rivals FC"]}
+
+
+class MatchupReportTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.cfg = make_cfg(self.tmp)
+        self.conn = connect(":memory:")
+        seed(self.conn)
+        self.conn.execute("UPDATE sleeper_users SET team_name = 'Rivals FC' WHERE user_id = 'u2'")
+        self.opp(["s5", "s6"])
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def opp(self, players, reserve=()):
+        self.conn.execute("UPDATE sleeper_rosters SET players_json = ?, reserve_json = ? WHERE roster_id = 2",
+                          (json.dumps(players), json.dumps(list(reserve))))
+
+    def build(self, schedule=SCHED, context=None):
+        self.cfg.schedule = schedule
+        return build_report(self.conn, self.cfg, NOW, context=context)
+
+    def test_projected_matchup_block(self):
+        m = self.build()["matchup"]
+        self.assertEqual((m["gw"], m["mode"], m["notice"]), (9, "projected", None))
+        self.assertEqual((m["them"]["name"], m["them"]["username"], m["them"]["record"]), ("Rivals FC", "rival", "–"))
+        ids = [s["player"]["sleeper_id"] for s in m["them"]["starters"] if s["player"]]
+        self.assertEqual(ids, ["s5"])
+        self.assertEqual(m["them"]["total"], round(sum(s["player"]["proj"] for s in m["them"]["starters"] if s["player"]), 1))
+        self.assertEqual(m["me"]["name"], "me")
+        self.assertEqual(len(m["me"]["starters"]), 3)
+
+    def test_opponent_players_do_not_leak(self):
+        without, c0 = self.build(schedule=None), {}
+        self.build(schedule=None, context=c0)
+        c1 = {}
+        r = self.build(context=c1)
+        self.assertEqual(r["free_agents"], without["free_agents"])
+        self.assertEqual(r["swaps"], without["swaps"])
+        self.assertEqual(r["xi"], without["xi"])
+        self.assertEqual(set(c1["ctx"]), set(c0["ctx"]))
+        self.assertFalse({"s5", "s6"} & set(c1["ctx"]))
+
+    def test_opponent_ir_excluded(self):
+        self.opp(["s5", "s6"], reserve=["s5"])
+        m = self.build()["matchup"]
+        self.assertFalse([s for s in m["them"]["starters"] if s["player"]])
+        self.assertEqual([p["sleeper_id"] for p in m["them"]["bench"]], ["s6"])
+
+    def test_empty_opponent_roster(self):
+        self.opp([])
+        m = self.build()["matchup"]
+        self.assertEqual(m["them"]["total"], 0.0)
+        self.assertTrue(all(s["player"] is None for s in m["them"]["starters"]))
+
+    def test_after_swaps_total(self):
+        self.opp(["s6"])
+        c = {}
+        m = self.build(context=c)["matchup"]
+        self.assertTrue(c["swaps"])
+        drops = {s.drop.sleeper_id for s in c["swaps"]}
+        roster = [pl for pl in c["ctx"].values() if pl.on_roster and pl.sleeper_id not in drops]
+        expected = best_xi(roster + [s.add for s in c["swaps"]], c["slots"], self.cfg.slot_eligibility).total
+        self.assertEqual(m["after_swaps"], round(expected, 1))
+        self.assertGreater(m["after_swaps"], m["me"]["total"])
+
+    def test_no_schedule_no_matchup(self):
+        r = self.build(schedule=None)
+        self.assertIsNone(r["matchup"])
+        self.assertTrue(all(m["mine"] is None and m["theirs"] is None for m in r["matches"]))
+
+    def test_week_outside_schedule_no_matchup(self):
+        self.assertIsNone(self.build(schedule={"start_gw": 10, "end_gw": 31, "opponents": ["Rivals FC"]})["matchup"])
+
+    def test_unmatched_name_gives_notice(self):
+        m = self.build(schedule={"start_gw": 9, "end_gw": 31, "opponents": ["Nobody"]})["matchup"]
+        self.assertIn("Nobody", m["notice"])
+        self.assertIsNone(m["me"])
+        self.assertIsNone(m["them"])
+
+    def test_badges_and_fixture_counts(self):
+        self.conn.execute("UPDATE fpl_teams SET code = 3 WHERE short_name = 'ARS'")
+        r = self.build()
+        self.assertEqual(r["badges"], {"ARS": 3, "CHE": None})
+        fx = r["matches"][0]
+        self.assertEqual((fx["home"], fx["away"]), ("ARS", "CHE"))
+        mine = sum(1 for s in r["matchup"]["me"]["starters"] if s["player"] and s["player"]["club"] in ("ARS", "CHE"))
+        self.assertEqual((fx["mine"], fx["theirs"]), (mine, 1))
+
+    def test_record_from_roster(self):
+        self.conn.execute("UPDATE sleeper_rosters SET wins = 4, losses = 3, ties = 0 WHERE roster_id = 2")
+        self.assertEqual(self.build()["matchup"]["them"]["record"], "4–3")
+
+
 from sleeperfpl.pricing import poisson_probs  # noqa: E402
 
 

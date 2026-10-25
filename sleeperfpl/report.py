@@ -20,6 +20,7 @@ from .gameweek import MATCH_LENGTH, live_gameweek, matches_left, season_of, targ
 from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
+from .matchup import find_opponent, formation, opponent_for, record_text, team_label
 from .live import unlikely_to_play, zero_minute_replacements
 from .markets import find_fixture, latest_quotes, mid, team_code, usable
 from .minutes import fixture_minutes, history, last_season_start_share, player_minutes, regular_weeks, season_rows
@@ -150,10 +151,12 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     for r in rosters:
         for key in ("players_json", "starters_json", "reserve_json"):
             r[key[:-5]] = json.loads(r[key] or "[]")
-    mine = _owner_roster(_rows(conn, "sleeper_users"), rosters, cfg.owner)
+    users = _rows(conn, "sleeper_users")
+    mine = _owner_roster(users, rosters, cfg.owner)
     taken = rostered_ids(rosters)
 
-    teams = {t["team_id"]: t["short_name"] for t in _rows(conn, "fpl_teams")}
+    fpl_teams = _rows(conn, "fpl_teams")
+    teams = {t["team_id"]: t["short_name"] for t in fpl_teams}
     fixtures = _rows(conn, "fpl_fixtures")
     events = _rows(conn, "fpl_events")
     season = season_of(events) or "unknown"
@@ -194,18 +197,28 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     trending = {t["player_id"]: t["count"] for t in _rows(conn, "sleeper_trending")}
 
     my_ids, reserve = set(mine["players"]), set(mine["reserve"])
+    # This week's head-to-head opponent: projected like the owner's roster, but kept in opp_ctx so
+    # none of their players ever reach free agents, swaps, the logs or the second opinion.
+    matchup_gw = gw.gw
+    opp_name = opponent_for(cfg.schedule, matchup_gw)
+    opp_roster, opp_notice = (find_opponent(opp_name, users, rosters, mine["roster_id"]) if opp_name
+                              else (None, None))
+    opp_ids = set(opp_roster["players"]) - my_ids if opp_roster else set()
+    opp_reserve = set(opp_roster["reserve"]) if opp_roster else set()
+    opp_ctx = {}
     mins = (_MinutesInputs(conn, cfg, sleeper_season, last_finished, fixtures, teams, now, scoring, rebuild=log)
             if use_sleeper else None)
     ctx = {}
     for p in players:
         sid = p["player_id"]
-        if sid not in my_ids and (sid in taken or not p["team"] or not p["active"]):
+        if sid not in my_ids and sid not in opp_ids and (sid in taken or not p["team"] or not p["active"]):
             continue  # someone else's player, or not a usable free agent
         el = el_by_id.get(match.mapping.get(sid))
         fpl_id = el["fpl_id"] if el else None  # an id missing from FPL counts as unmatched
         club = teams.get(el["team_id"], p["team"]) if el else p["team"]
         pl = PlayerCtx(sleeper_id=sid, name=p["name"] or sid, positions=p["positions"], club=club,
-                       fpl_id=fpl_id, on_roster=sid in my_ids, in_reserve=sid in reserve,
+                       fpl_id=fpl_id, on_roster=sid in my_ids,
+                       in_reserve=sid in (opp_reserve if sid in opp_ids else reserve),
                        flag=_flag(p, el, deadline_passed), fixtures=by_team.get(club, []) if el else [],
                        trending_adds=trending.get(sid))
         if el:
@@ -224,11 +237,14 @@ def build_report(conn, cfg, now, *, log=True, context=None):
                 _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg)
             if mins and mins.model:
                 _apply_minutes(pl, pos, p, el, weeks, scoring, fodds, baseline, cfg, mins, deadline_passed)
-        ctx[sid] = pl
+        (opp_ctx if sid in opp_ids else ctx)[sid] = pl
     for sid in my_ids - set(ctx):
         # On the roster but absent from Sleeper's player map: show it, never hide it.
         ctx[sid] = PlayerCtx(sleeper_id=sid, name=f"Sleeper player {sid}", positions=[], club="",
                              fpl_id=None, on_roster=True, in_reserve=sid in reserve, flag="no data")
+    for sid in opp_ids - set(opp_ctx):
+        opp_ctx[sid] = PlayerCtx(sleeper_id=sid, name=f"Sleeper player {sid}", positions=[], club="",
+                                 fpl_id=None, in_reserve=sid in opp_reserve, flag="no data")
 
     roster = [pl for pl in ctx.values() if pl.on_roster]
     keep_unmatched = []
@@ -270,12 +286,20 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     target = sorted((f for f in fixtures if gw.gw and f.get("event") == gw.gw), key=lambda f: f.get("kickoff_time") or "")
     matches = [_match_entry(f, teams, fodds.get(f["fixture_id"]) or all_odds.get(f["fixture_id"]),
                             f["fixture_id"] not in fodds) for f in target]
+    matchup = _matchup_block(matchup_gw, opp_name, opp_roster, opp_notice, users, mine, roster, opp_ctx,
+                             lineup, swaps, slots, cfg)
+    counted = matchup if matchup and matchup["them"] and matchup["gw"] == gw.gw else None
+    for m in matches:
+        m["mine"], m["theirs"] = ((_count_in(counted["me"], m), _count_in(counted["them"], m)) if counted
+                                  else (None, None))
     priced = sum(1 for f in target if f["fixture_id"] in fodds)
     note = "difficulty" if not use_sleeper or priced == 0 else "market" if priced == len(target) else "mixed"
 
     return {
         "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "live": live,
+        "matchup": matchup,
+        "badges": {t["short_name"]: t.get("code") for t in fpl_teams},
         "report_card": {"weeks": [_rounded(w) for w in card[-8:]],
                         "decisions": [_rounded(d) for d in decisions[-8:]],
                         "matches": [_rounded(m) for m in match_card[-8:]],
@@ -314,6 +338,39 @@ def build_report(conn, cfg, now, *, log=True, context=None):
         "second_opinion": _second_opinion_block(conn, sleeper_season, gw.gw, {p["player_id"]: p for p in players},
                                                 my_ids, taken, lineup, swaps),
     }
+
+
+def _side(user, roster, lineup):
+    return {"name": team_label(user), "username": user.get("display_name"), "record": record_text(roster),
+            "total": round(lineup.total, 1),
+            "formation": formation([pl.positions for _, pl in lineup.starters if pl]),
+            "starters": [{"slot": s, "player": _player_dict(pl) if pl else None, "points": None, "state": None}
+                         for s, pl in lineup.starters],
+            "bench": [_player_dict(pl) for pl in lineup.bench]}
+
+
+def _matchup_block(gw, opp_name, opp_roster, notice, users, mine, roster, opp_ctx, lineup, swaps, slots, cfg):
+    """Both sides of this week's head-to-head (None without a scheduled opponent)."""
+    if not opp_name:
+        return None
+    block = {"gw": gw, "mode": "projected", "notice": notice, "me": None, "them": None, "after_swaps": None}
+    if opp_roster is None:
+        return block
+    user_of = {u["user_id"]: u for u in users}
+    their_xi = best_xi(list(opp_ctx.values()), slots, cfg.slot_eligibility)
+    block["me"] = _side(user_of.get(mine["owner_id"], {}), mine, lineup)
+    block["them"] = _side(user_of.get(opp_roster["owner_id"], {}), opp_roster, their_xi)
+    if swaps:
+        drops = {s.drop.sleeper_id for s in swaps}
+        after = best_xi([pl for pl in roster if pl.sleeper_id not in drops] + [s.add for s in swaps],
+                        slots, cfg.slot_eligibility)
+        block["after_swaps"] = round(after.total, 1)
+    return block
+
+
+def _count_in(side, match):
+    """How many of a side's starters play in this fixture."""
+    return sum(1 for s in side["starters"] if s["player"] and s["player"]["club"] in (match["home"], match["away"]))
 
 
 def _second_opinion_block(conn, season, gw, players, my_ids, taken, lineup, swaps):

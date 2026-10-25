@@ -1,6 +1,6 @@
 import unittest
 
-from sleeperfpl.matchup import find_opponent, opponent_for, team_label
+from sleeperfpl.matchup import find_opponent, formation, opponent_for, pitch_row, record_text, team_label
 
 S = {"start_gw": 9, "end_gw": 31, "opponents": ["A", "B", "C", "D", "E"]}
 USERS = [{"user_id": "u1", "display_name": "ttvlyto", "team_name": "noSHOWdegaard"},
@@ -40,6 +40,18 @@ class FindOpponentTests(unittest.TestCase):
 
     def test_team_label(self):
         self.assertEqual([team_label(u) for u in USERS], ["noSHOWdegaard", "Machine Gun Skelly", "briantrovato"])
+
+
+class DisplayTests(unittest.TestCase):
+    def test_pitch_row_and_formation(self):
+        self.assertEqual([pitch_row(p) for p in (["F", "M"], ["MID"], ["D"], ["GK"], [], ["X"])], [0, 1, 2, 3, 1, 1])
+        self.assertEqual(formation([["D"], ["D"], ["D"], ["M"], ["M", "D"], ["F", "M"], ["GK"]]), "3-2-1")
+
+    def test_record_text(self):
+        self.assertEqual(record_text({"wins": 4, "losses": 3, "ties": 0}), "4–3")
+        self.assertEqual(record_text({"wins": 4, "losses": 3, "ties": 1}), "4–3–1")
+        self.assertEqual(record_text({"wins": None}), "–")
+        self.assertEqual(record_text({}), "–")
 
 
 if __name__ == "__main__":
