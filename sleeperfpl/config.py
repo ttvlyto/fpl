@@ -91,6 +91,8 @@ class Config:
 
 def _second_opinion(raw, cfg_path):
     so = {**DEFAULTS["second_opinion"], **raw}
+    if not isinstance(so["enabled"], bool):
+        raise ConfigError(f"{cfg_path}: second_opinion enabled must be true or false (no quotes)")
     try:
         so["enabled"], so["model"], so["lead_hours"] = bool(so["enabled"]), str(so["model"]), float(so["lead_hours"])
     except (TypeError, ValueError) as e:

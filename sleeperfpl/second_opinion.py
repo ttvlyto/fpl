@@ -11,7 +11,7 @@ from collections import namedtuple
 from datetime import timedelta
 
 from .availability import chance_for
-from .db import latest
+from .db import latest, meta_get, meta_set
 from .gameweek import target_gameweek
 from .headtohead import all_results, form, head_to_head, season_results
 from .lineup import _eligible, best_xi
@@ -92,6 +92,7 @@ def build_packet(conn, cfg, now):
         home, away = names.get(f["team_h"], ""), names.get(f["team_a"], "")
         fixtures.append({
             "fixture_id": f["fixture_id"], "home": c["teams"].get(f["team_h"]), "away": c["teams"].get(f["team_a"]),
+            "home_name": home, "away_name": away,
             "kickoff": f.get("kickoff_time"),
             **{k: None if odds is None else round(getattr(odds, k), 2) for k in ("p_home", "p_draw", "p_away")},
             "xg_home": None if odds is None else round(odds.lam_home, 2),
@@ -187,6 +188,10 @@ SYSTEM_PROMPT = """You are advising the manager of a Sleeper fantasy Premier Lea
 The user message is a JSON packet with the league's starting slots and scoring, the manager's roster,
 a list of free agents, and this game week's fixtures with betting odds, head-to-head records and form.
 
+Each fixture's head_to_head counts the two clubs' recent league meetings at either venue:
+home_wins and home_winless_run are for the fixture's home club (home_name), away_wins and
+away_winless_run for its away club; a winless run of null means they haven't met.
+
 Pick the starting XI and up to max_swaps drop/add swaps that will score the most league points this
 game week. Apply your swaps first: pick the XI from the roster after them, so a player you add may
 start and a player you drop may not. Players on IR can't start or be dropped; undroppable players
@@ -232,9 +237,19 @@ def make_request(packet, cfg, problems=None, previous=None):
             "system": SYSTEM_PROMPT, "messages": messages}
 
 
+MAX_ATTEMPTS = 2   # failed runs per game week before the hourly job gives up (each one is billed)
+
+
+def _attempts_key(season, gw):
+    return f"second_opinion_attempts_{season}_{gw}"
+
+
 def is_due(conn, season, gw, first_kickoff, now, lead_hours):
-    """A game week to plan, its first kickoff within lead_hours, and no opinion saved for it yet."""
+    """A game week to plan, its first kickoff within lead_hours, no opinion saved for it yet,
+    and fewer than MAX_ATTEMPTS tries so far."""
     if not gw or first_kickoff is None or first_kickoff - now > timedelta(hours=lead_hours):
+        return False
+    if int(meta_get(conn, _attempts_key(season, gw)) or 0) >= MAX_ATTEMPTS:
         return False
     return conn.execute("SELECT 1 FROM second_opinion_log WHERE season = ? AND gw = ?",
                         (season, gw)).fetchone() is None
@@ -261,6 +276,9 @@ def run_second_opinion(conn, cfg, now, *, force=False, call=None, refresh=None):
                          [dict(r) for r in latest(conn, "fpl_fixtures")], now)
     if not force and not is_due(conn, season, gw.gw, gw.first_kickoff, now, so["lead_hours"]):
         return f"second opinion: not due (GW{gw.gw or '-'})"
+    if gw.gw:
+        key = _attempts_key(season, gw.gw)
+        meta_set(conn, key, str(int(meta_get(conn, key) or 0) + 1))
     if refresh:
         refresh()
     packet, context = build_packet(conn, cfg, now)

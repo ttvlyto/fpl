@@ -46,18 +46,19 @@ def _winless_run(meetings, team):
     return run
 
 
-def head_to_head(results, a, b, n=10):
-    """The last `n` league meetings of a and b (newest first) with wins/draws over them, and how
-    many meetings in a row each side has gone without a win (over every stored meeting)."""
-    meetings = sorted((r for r in results if {r.home, r.away} == {a, b}), reverse=True)
+def head_to_head(results, home, away, n=10):
+    """The last `n` league meetings of this fixture's two clubs (newest first, either venue) with wins and
+    draws over them, and how many meetings in a row each side has gone without a win (over every stored
+    meeting; None when they have never met)."""
+    meetings = sorted((r for r in results if {r.home, r.away} == {home, away}), reverse=True)
     recent = meetings[:n]
     return {"meetings": [{"date": r.date, "home": r.home, "away": r.away, "score": f"{r.hg}-{r.ag}"}
                          for r in recent],
-            "a_wins": sum(1 for r in recent if _winner(r) == a),
+            "home_wins": sum(1 for r in recent if _winner(r) == home),
             "draws": sum(1 for r in recent if _winner(r) is None),
-            "b_wins": sum(1 for r in recent if _winner(r) == b),
-            "a_winless_run": _winless_run(meetings, a),
-            "b_winless_run": _winless_run(meetings, b)}
+            "away_wins": sum(1 for r in recent if _winner(r) == away),
+            "home_winless_run": _winless_run(meetings, home) if meetings else None,
+            "away_winless_run": _winless_run(meetings, away) if meetings else None}
 
 
 def form(results, team, n=5):

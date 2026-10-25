@@ -12,19 +12,19 @@ RESULTS = [Result("2023-01-01", "Arsenal", "Chelsea", 2, 0), Result("2023-08-01"
 class HeadToHeadTests(unittest.TestCase):
     def test_head_to_head_counts_and_winless_runs(self):
         h = head_to_head(RESULTS, "Arsenal", "Chelsea")
-        self.assertEqual((h["a_wins"], h["draws"], h["b_wins"]), (1, 2, 1))
-        self.assertEqual((h["a_winless_run"], h["b_winless_run"]), (3, 1))
+        self.assertEqual((h["home_wins"], h["draws"], h["away_wins"]), (1, 2, 1))
+        self.assertEqual((h["home_winless_run"], h["away_winless_run"]), (3, 1))
         self.assertEqual(h["meetings"][0], {"date": "2024-08-01", "home": "Arsenal", "away": "Chelsea", "score": "0-0"})
 
     def test_head_to_head_limits_meetings_but_not_runs(self):
         h = head_to_head(RESULTS, "Arsenal", "Chelsea", n=2)
         self.assertEqual(len(h["meetings"]), 2)
-        self.assertEqual((h["a_wins"], h["draws"], h["b_wins"]), (0, 1, 1))
-        self.assertEqual(h["a_winless_run"], 3)
+        self.assertEqual((h["home_wins"], h["draws"], h["away_wins"]), (0, 1, 1))
+        self.assertEqual(h["home_winless_run"], 3)
 
     def test_no_meetings(self):
         h = head_to_head(RESULTS, "Arsenal", "Fulham")
-        self.assertEqual((h["meetings"], h["a_winless_run"], h["b_winless_run"]), ([], 0, 0))
+        self.assertEqual((h["meetings"], h["home_winless_run"], h["away_winless_run"]), ([], None, None))
 
     def test_form_from_team_perspective(self):
         self.assertEqual(form(RESULTS, "Chelsea", 2), ["D 0-0 v Arsenal (A)", "W 1-0 v Arsenal (H)"])

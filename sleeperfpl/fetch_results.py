@@ -17,8 +17,10 @@ META = "results_fetched_{season}"
 RESULTS_ALIASES = {
     "Man United": "Man Utd",
     "Tottenham": "Spurs",
-    "Nott'm Forest": "Nott'm Forest",
     "Sheffield United": "Sheffield Utd",
+    "Hull": "Hull City",
+    "Ipswich": "Ipswich Town",
+    "Coventry": "Coventry City",
 }
 
 
@@ -57,6 +59,8 @@ def fetch_results(conn, from_season, last_season, overrides, *, force=False, get
             continue
         code = f"{year % 100:02d}{(year + 1) % 100:02d}"
         rows = parse_results(get_text(URL.format(code=code)), season, aliases)
+        if not rows:
+            continue  # an error page or an empty file: try again next run
         with conn:
             conn.execute("DELETE FROM match_results WHERE season = ?", (season,))
             conn.executemany("INSERT OR REPLACE INTO match_results VALUES (?, ?, ?, ?, ?, ?)", rows)

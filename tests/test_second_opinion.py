@@ -80,8 +80,9 @@ class PacketTests(unittest.TestCase):
         packet, _ = so.build_packet(self.conn, self.cfg, NOW)
         f = packet["fixtures"][0]
         self.assertEqual((f["home"], f["away"]), ("ARS", "CHE"))
+        self.assertEqual((f["home_name"], f["away_name"]), ("Arsenal", "Chelsea"))
         self.assertEqual(len(f["head_to_head"]["meetings"]), 1)
-        self.assertEqual(f["head_to_head"]["a_wins"], 1)
+        self.assertEqual(f["head_to_head"]["home_wins"], 1)
         self.assertIsNone(f["p_home"])
 
     def test_no_target_week_raises_build_error(self):
@@ -265,8 +266,18 @@ class RunTests(unittest.TestCase):
     def test_refusal_or_bad_json_raises(self):
         for reply in ((GOOD, "refusal"), (GOOD, "max_tokens"), ("not json", "end_turn")):
             with self.assertRaises(BuildError):
-                so.run_second_opinion(self.conn, self.cfg, NOW, call=FakeCall(reply))
+                so.run_second_opinion(self.conn, self.cfg, NOW, call=FakeCall(reply), force=True)
         self.assertEqual(self.rows(), 0)
+
+    def test_failed_runs_stop_after_two_attempts(self):
+        for _ in range(2):
+            with self.assertRaises(BuildError):
+                so.run_second_opinion(self.conn, self.cfg, NOW, call=FakeCall(("not json", "end_turn")))
+        call = FakeCall()
+        self.assertIn("not due", so.run_second_opinion(self.conn, self.cfg, NOW, call=call))
+        self.assertEqual(call.requests, [])
+        so.run_second_opinion(self.conn, self.cfg, NOW, call=call, force=True)
+        self.assertEqual(self.rows(), 1)
 
     def test_disabled_does_nothing(self):
         self.cfg.second_opinion["enabled"] = False

@@ -19,6 +19,11 @@ class ParseResultsTests(unittest.TestCase):
         rows = parse_results(CSV, "2024", {**RESULTS_ALIASES, "Man United": "Manchester United"})
         self.assertEqual(rows[0][2], "Manchester United")
 
+    def test_promoted_club_names_mapped(self):
+        text = "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG\nE0,16/08/24,Hull,Ipswich,1,0\nE0,17/08/24,Coventry,Arsenal,0,1\n"
+        rows = parse_results(text, "2024", RESULTS_ALIASES)
+        self.assertEqual([(r[2], r[3]) for r in rows], [("Hull City", "Ipswich Town"), ("Coventry City", "Arsenal")])
+
     def test_unparseable_score_skipped(self):
         text = "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG\nE0,16/08/24,Arsenal,Wolves,,\n"
         self.assertEqual(parse_results(text, "2024", {}), [])
@@ -41,6 +46,11 @@ class FetchResultsTests(unittest.TestCase):
         self.assertEqual(len(urls), 2)
         self.assertEqual(fetch_results(conn, 2023, 2024, {}, force=True, get_text=get_text), 2)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM match_results").fetchone()[0], 4)
+
+    def test_empty_download_not_marked_fetched(self):
+        conn = connect(":memory:")
+        self.assertEqual(fetch_results(conn, 2024, 2024, {}, get_text=lambda url: "<html>error</html>"), 0)
+        self.assertEqual(fetch_results(conn, 2024, 2024, {}, get_text=lambda url: CSV), 1)
 
     def test_overrides_results_teams_applied(self):
         conn = connect(":memory:")

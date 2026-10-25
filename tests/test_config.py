@@ -30,7 +30,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.second_opinion["lead_hours"], 48)
 
     def test_second_opinion_bad_values_rejected(self):
-        for bad in ({"effort": "huge"}, {"lead_hours": 0}, {"lead_hours": "soon"}):
+        for bad in ({"effort": "huge"}, {"lead_hours": 0}, {"lead_hours": "soon"}, {"enabled": "false"}):
             path = self.write({"league_id": "1", "owner": "me", "second_opinion": bad})
             with self.assertRaisesRegex(ConfigError, "second_opinion"):
                 load_config(str(path))
