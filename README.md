@@ -8,6 +8,8 @@ your league's exact scoring:
 - match odds from Kalshi and Polymarket, used to adjust projections
 - a live match-day section
 - a report card on past projections
+- an expected-minutes estimate per player (chance of starting and of playing),
+  so a player only Sleeper calls "Out" isn't thrown away
 
 ## Requirements
 
@@ -29,7 +31,7 @@ Open `site/index.html` in a browser.
 
 To check how accurate the projections have been on past weeks, run
 `python3 -m sleeperfpl backtest` (add `fetch-history --season 2025` once to
-include last season).
+include last season; `backtest --minutes` also scores the minutes model).
 
 ## Documentation
 

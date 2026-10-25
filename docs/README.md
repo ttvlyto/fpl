@@ -38,7 +38,13 @@ code layout.
 - a **Report card**: week by week, how far off past projections were (players
   who didn't play count as 0), how well they ordered players within each
   position, the real points of the lineup you set vs the one this page suggested
-  vs the best possible from your roster, and how well the match odds did.
+  vs the best possible from your roster, and how well the match odds did. Once
+  minutes estimates have been logged, it also shows the minutes-aware
+  projection beside today's, a start-odds score, and how often players with
+  each injury label actually played.
+
+Hover a projection to see the player's estimated chance of starting and of
+playing, plus his FPL and Sleeper labels (see "Expected minutes").
 
 Points are your league's exact scoring, computed from Sleeper's own weekly
 stats. If those are unavailable, or you set `"stats_source": "fpl"`, it falls
@@ -86,11 +92,14 @@ paths inside the config (`db_path`, `output_dir`, `scoring_map_path`,
 |---|---|
 | `fetch-daily` | Sleeper league, users and players; FPL bootstrap (players, teams, game weeks) and fixtures. Creates `scoring_map.json` from the league's scoring if it doesn't exist. |
 | `fetch-rosters` | Sleeper rosters and trending adds. |
+| `fetch-status` | FPL bootstrap only (injury flags, chances, news), cheap enough to run around press conferences. |
 | `fetch-history [--force]` | Sleeper weekly stats (`sleeper_stats`) plus the FPL per-match history crawl (`fpl_history`, always run regardless of `stats_source`). The Sleeper step fetches every stored-missing week up to the last finished game week and re-fetches the latest stored week on every run, so once at least one game week has finished the command is never a pure no-op (before that, it does nothing). The FPL crawl is skipped unless a new game week has finished since the last complete crawl; `--force` re-crawls. The crawl fetches every player with minutes > 0, one request per player at `fpl_request_interval`; if any player fails, the "last crawled" marker is not advanced and the next run retries. With `--season <year>` (a past season) it only fetches that season's Sleeper stats, weeks 1–38, for `backtest`; it skips the FPL crawl and doesn't change the stats week shown on the page. |
 | `coverage` | Reads only `scoring_map.json` and the stored league (no DB writes). Lists the rules, which ones FPL can and can't cover, league scoring keys missing from the map or with different points, and makes two live probes of Sleeper's stats endpoints (`api.sleeper.app` and `api.sleeper.com`; see Data sources). |
 | `fetch-markets` | Kalshi and Polymarket match odds (no player markets; those come from `matchday`). A failing source warns and writes nothing; it doesn't stop the other. |
 | `matchday [--force]` | For match days. Runs only if a kickoff falls within the next `matchday_window_hours`, or a match kicked off between 2.5 and 5 hours ago (just finished; this post-match window is fixed, not configurable). `--force` runs anyway. When it runs it refreshes rosters, fixtures, Kalshi odds including player markets, Polymarket odds, live Sleeper stats for the current game week, then runs `build`. Each step that fails only prints `warning: <step> failed` and the rest continue. When not due it prints a "skipped" line, does not build, and exits 0. |
-| `backtest [--season S] [--json PATH]` | Replays finished game weeks to compare projection methods (`v1` and a naive `season_avg` today). For week *g* it uses only each player's Sleeper stats from earlier weeks of the same season, scores every player who played in one of the 5 weeks before, and prints per week the average miss (everyone / played only) and how well each method ordered players within each position, then how many weeks each method beat `v1`. Seasons are reported separately. `--season` (repeatable) picks seasons, default all stored. `--json` also writes the full results. Past seasons have no fixture data, so `v1` runs with a neutral multiplier there and blank or double weeks are skipped. Read-only. |
+| `backtest [--season S] [--json PATH]` | Replays finished game weeks to compare projection methods (`v1` and a naive `season_avg` today). For week *g* it uses only each player's Sleeper stats from earlier weeks of the same season, scores every player who played in one of the 5 weeks before, and prints per week the average miss (everyone / played only) and how well each method ordered players within each position, then how many weeks each method beat `v1`. Seasons are reported separately. `--season` (repeatable) picks seasons, default all stored. `--json` also writes the full results. Past seasons have no fixture data, so `v1` runs with a neutral multiplier there and blank or double weeks are skipped. `v1m` refits the minutes model for each week on earlier weeks only (needs 1,500 rows, else the shipped default if it is from an earlier season, else that week has no v1m); the output adds the per-week difference v1m − v1 with a 95% range and a sign-flip p-value, and the "minutes error share" (v1m's miss against v1m given each player's actual minutes). `--minutes` also prints Brier scores for P(start), P(appear) and P(60+) against two baselines (last week; last 5 weeks) and a reliability table. Read-only. |
+| `fit-minutes [--force] [--export PATH]` | Refits the start model on every stored regular week and saves it (`minutes_model`); prints the rows used and a holdout Brier score on the newest season's last 4 weeks. Does nothing if no new week was stored since the last fit, unless `--force`. `--export` also writes the model as JSON (the shipped default came from a 2025-only fit). |
+| `label-audit` | Rebuilds and prints, per injury label, how many logged players had it and how often they started, played (with a 90% range) and reached 60 minutes. "Sleeper says Out, FPL says available" comes first. Empty until weeks finish after builds have logged labels. |
 | `build` | Writes `report.json` and `index.html` to `output_dir` (via a temp file and rename) and, when it uses Sleeper stats and there is a target game week, appends to `projection_log`. Prints `wrote <dir>/index.html (GW<n>, <k> swap tips)`. |
 
 Every command first opens the database, creating `data/` and all tables if
@@ -137,6 +146,53 @@ Players who didn't play count too, as 0 points (or whatever their stats score),
 so a projection for someone who sat out is a miss.
 The report card needs those logs, so it is empty when stats come from FPL.
 
+## Injury labels and expected minutes
+
+**Who counts as out.** A player is "out" (projection 0, never picked, never
+suggested) only when FPL says so: suspended (`s`), unavailable (`u`), not in
+the squad (`n`), or a 0% chance of playing. Sleeper's `injury_status` never
+makes a player out: Sleeper's labels are often wrong, and a player only
+Sleeper calls "Out" gets his normal projection with the flag "Sleeper: out".
+FPL injured or doubtful with a chance above 0 shows as "doubtful".
+FPL's "chance of playing next round" means the target game week only until its
+deadline; after the deadline the tool reads FPL's "this round" chance instead.
+
+**Expected minutes** (`minutes.py`, `minutes_fit.py`). For each player:
+
+- His regular weeks this season (every club played once) become states:
+  started, came off the bench, or no minutes. Weeks FPL had him out of are left
+  out once the label history covers them.
+- A logistic regression on recent states (start rates over 3 and 10 weeks,
+  last week's minutes, a run of zero-minute weeks, position) gives P(start).
+  It is fitted by `fit-minutes` on every stored regular week; a default fit
+  from 2025 (`sleeperfpl/minutes_coef.json`) is used until the first fit.
+- His bench record gives P(sub | no start); per-position minute tables,
+  measured from stored weeks and moved toward his own last 10 starts, give a
+  spread of likely minutes per fixture.
+- With fewer than 3 weeks of history, P(start) leans on his start share last
+  season (any club), else his position's rate for such players.
+- **Labels** then adjust both chances. FPL's label leads (e.g. 75% doubtful
+  multiplies P(start) by 0.63 and P(appear) by 0.82); Sleeper's adds a small
+  modifier on top (Sleeper "Out" with FPL available: ×0.80 start, ×0.95
+  appear). These starting values are guesses; after each finished week the
+  table learns from how often logged players with each label actually started
+  and played (observed over expected, with `label_prior_k` pseudo-players behind
+  each guess). If FPL's news is older than the club's last match, a one-match
+  doubt counts half.
+
+**`v1m` and `v2m`.** v1m is v1 with minutes: points per 90 (from recent played
+weeks) times each scenario's minutes, plus clean-sheet points only in scenarios
+of 60+ minutes (in this league clean sheets need 60). v2m does the same to v2:
+the market clean-sheet chance uses P(60+), and everything else scales with
+expected minutes.
+
+**Shadow vs on.** With `minutes_model: "shadow"` (default) the minutes numbers
+are computed, logged and shown on hover, but picks use v1/v2. With `"on"`,
+v1m/v2m drive the projection, XI, swaps and free agents. A sensible rule for
+switching on: in `backtest`, v1m has a lower average miss than v1 with a 95%
+range on the weekly difference that excludes 0, and its average order is no
+more than 0.01 worse.
+
 ## Configuration (`config.json`)
 
 `league_id` and `owner` are required (a missing or empty value is an error);
@@ -169,6 +225,9 @@ default. Unknown keys are silently ignored. `config.json` is git-ignored.
 | `flag_goal_gap` | 0.20 | goal-chance gap that earns a ⚑ |
 | `category_low` | 3 | league-point cutoffs for the report card's low / mid / haul groups: low is under `category_low`, haul is `category_haul` or more. `category_low` must be less than `category_haul` |
 | `category_haul` | 10 | see `category_low` |
+| `minutes_model` | `"shadow"` | `"shadow"`: minutes estimates are logged and shown only; `"on"`: v1m/v2m drive picks |
+| `label_prior_k` | 20 | how many pseudo-players stand behind each label's starting guess before this league's outcomes take over |
+| `sleeper_label_weight` | 1.0 | 0 to 1: how much Sleeper's injury labels move the minutes estimate (0 ignores them) |
 
 ## `scoring_map.json`
 
@@ -229,8 +288,13 @@ season for the same reason).
    - `fetch-history` daily at 03:30 (the FPL crawl is skipped unless a game
      week has finished, but the Sleeper stats step runs every time);
    - `fetch-rosters` every 4 hours, and hourly 12:00–23:00 on Thursdays;
+   - `fetch-status` every 4 hours at :30, and hourly 12:30–23:30 on Thursdays
+     and Fridays (press conferences);
+   - `fit-minutes` after `fetch-history` (skips itself when no new week is
+     stored);
    - `fetch-markets` every 2 hours at :15;
-   - `matchday` every 30 minutes Friday to Monday.
+   - `matchday` every 30 minutes Friday to Monday (it also refreshes FPL's
+     injury flags before kickoffs).
 4. Install `deploy/sleeperfpl-web.service` (instructions at the top of the
    file) to serve `site/` at `http://<server>:8080/` with Python's
    `http.server`. Keep port 8080 closed on your router.
@@ -263,6 +327,14 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
   mid-season transfer is replayed at his new club. Past seasons have no fixture
   data (neutral multiplier), and the backtest can't replay market odds, injury
   flags or lineup decisions, because none of those were stored back then.
+- **Minutes model gaps.** Returns from injury, manager changes and European
+  midweek rotation aren't modelled; a double week uses the same minutes for
+  both matches. Injury labels can't be backtested (no history of them before
+  2026-10-24), and the label table starts from guesses until this league's
+  outcomes build up.
+- **No rollback past this version.** The database gains columns that older
+  code can't write to; going back to an older version needs a database backup
+  from before the upgrade.
 - **Planned, not built:** a prediction model to replace the projection step, and
   a Claude "second opinion" that reads `site/report.json`.
 
@@ -290,14 +362,18 @@ Details of `report.json` worth knowing:
 - `live` is `null` when there is no live game week.
 - `report_card` has `weeks` (per finished week: `n`, `mae_v1` over everyone,
   `mae_v1_played`, `by_cat_v1` per outcome group `dnp`/`low`/`mid`/`haul`,
-  `rank_v1` and the v2 and `ep_next` comparisons), `decisions` (`set_pts`,
+  `rank_v1`, the v2 and `ep_next` comparisons, `mae_v1m`/`rank_v1m` beside v1 on
+  the same players, the same for v2m, and `brier_start`/`brier_app`), `labels`
+  (the `label-audit` rows), `decisions` (`set_pts`,
   `tool_pts`, `best_pts` and swap outcomes), `matches` (`log_loss`, `rps`,
   `brier_cs`) and `summary`. Each list keeps the last 8 weeks.
 - `matches` entries have `market: null`, or `"ok"` with `stale`, `p_home`,
   `p_draw`, `p_away`, `lam_home`, `lam_away`, `cs_home`, `cs_away`.
 - Player objects carry `sleeper_id`, `name`, `positions`, `club`, `flag`, `avg`,
   `n`, `proj`, `proj_v1`, `proj_source`, `trending_adds`, `undroppable`,
-  `market_flags`, `p_goal_market`, `p_goal_hist` and `fixtures`.
+  `market_flags`, `p_goal_market`, `p_goal_hist`, `fixtures`, and the minutes
+  estimate: `p_start`, `p_app`, `p60`, `e_min`, `fpl_bucket`, `slp_bucket`,
+  `proj_v1m`, `proj_v2m` (all null without a model or Sleeper stats).
 - `free_agents` is keyed by each player's first listed position.
 - The "Approximate" banner appears only when stats come from FPL and some
   scoring rules have no FPL field or some league scoring keys are absent from
@@ -334,7 +410,7 @@ every snapshot, which is the history a future prediction model would need.
 | `sleeper_rosters` | `roster_id`, `owner_id`, `players_json`, `starters_json`, `reserve_json` |
 | `sleeper_users` | `user_id`, `display_name` |
 | `sleeper_trending` | `direction`, `player_id`, `count` |
-| `fpl_elements` | `fpl_id`, `first_name`, `second_name`, `web_name`, `team_id`, `element_type`, `status`, `chance_next`, `total_minutes`, `ep_next` (FPL's own expected points) |
+| `fpl_elements` | `fpl_id`, `first_name`, `second_name`, `web_name`, `team_id`, `element_type`, `status`, `chance_next`, `total_minutes`, `ep_next` (FPL's own expected points), `news`, `news_added`, `chance_this` (FPL's chance for the current round) |
 | `fpl_teams` | `team_id`, `short_name`, `name` |
 | `fpl_events` | `event_id`, `deadline_time`, `finished` |
 | `fpl_fixtures` | `fixture_id`, `event`, `team_h`, `team_a`, `team_h_difficulty`, `team_a_difficulty`, `kickoff_time`, `finished`, `team_h_score`, `team_a_score` |
@@ -350,7 +426,9 @@ missing columns in place.
 |---|---|---|
 | `fpl_history` | `(season, fpl_id, fixture_id)` | per-match FPL stats (`round`, `kickoff_time`, `minutes`, `stats_json`) |
 | `sleeper_stats` | `(season, week, player_id)` | Sleeper weekly stats (`stats_json`) |
-| `projection_log` | none (append-only) | every build's projections (`v1`, `v2`, `p_goal_market`, plus `position` and FPL's `ep_next`) for the report card |
+| `projection_log` | none (append-only) | every build's projections (`v1`, `v2`, `p_goal_market`, plus `position` and FPL's `ep_next`) for the report card, and the minutes estimate: `v1m`, `v2m`, `p_start`, `p_app`, `p60`, `e_min`, the labels used (`fpl_bucket`, `slp_bucket`, `label_at`), and the chances before labels (`p_start_model`, `p_app_model`) and after FPL's (`p_start_fpl`, `p_app_fpl`) |
+| `minutes_model` | `version` | fitted start models (`model_json`, `n_rows`, `trained_on` = last stored week, `holdout_brier`); the newest is used |
+| `label_counts` | `(season, kind, cell)` | per injury label: players, starts, appearances, 60+ and expected starts/appearances, rebuilt each build from `projection_log` and `sleeper_stats` |
 | `match_log` | none (append-only) | every build's fitted odds per target-week fixture (`method`, `lam_home`, `lam_away`, win/draw/away and clean-sheet chances, `n_quotes`, `avg_spread`) |
 | `recommendation_log` | none (append-only) | every build's suggested XI (`xi_json`) and swaps (`swaps_json`), with `roster_id` and the week's `first_kickoff` |
 | `meta` | `key` | small key/value state |
@@ -372,8 +450,11 @@ sleeperfpl/
   scoring_map.py     scoring_map.json, coverage, FPL-based points
   matching.py        link Sleeper players to FPL players; overrides.json
   gameweek.py        which game week to plan for; free agents vs waivers
-  projection.py      v1: recent average x fixture difficulty
-  projection_v2.py   v2: market-adjusted projection
+  projection.py      v1: recent average x fixture difficulty; v1m: the same with expected minutes
+  projection_v2.py   v2: market-adjusted projection; v2m: with expected minutes
+  availability.py    FPL/Sleeper injury labels: who's out, label adjustments, learning, label-audit
+  minutes.py         expected minutes: history, features, P(start)/P(appear), minute scenarios
+  minutes_fit.py     fit the start model (IRLS); minutes_coef.json is the shipped default
   lineup.py          best legal XI, swap tips, free-agent ranking
   live.py            in-week alerts and 0-minute bench swaps
   report_card.py     projection accuracy per finished game week
