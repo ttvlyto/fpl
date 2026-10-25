@@ -6,6 +6,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .availability import audit_rows, format_audit, rebuild_label_counts
 from .backtest import format_backtest, run_backtest
 from .config import ConfigError, load_config
 from .db import connect, latest
@@ -142,6 +143,18 @@ def cmd_backtest(cfg, conn, args):
         print(f"wrote {args.json}")
 
 
+def cmd_label_audit(cfg, conn, args):
+    season = str(_league(conn).get("season") or "")
+    finished = [r["event_id"] for r in latest(conn, "fpl_events") if r["finished"]]
+    rebuild_label_counts(conn, season, max(finished) if finished else None,
+                         datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    rows = audit_rows(conn, season)
+    if not rows:
+        print("no label history yet: it builds up as weeks finish after builds have logged labels")
+        return
+    print(format_audit(rows))
+
+
 HOLDOUT_WEEKS = 4
 
 
@@ -187,6 +200,7 @@ COMMANDS = {
     "build": (cmd_build, "write report.json and index.html"),
     "backtest": (cmd_backtest, "replay past weeks to compare projection methods"),
     "fit-minutes": (cmd_fit_minutes, "refit the start/minutes model from stored Sleeper weeks"),
+    "label-audit": (cmd_label_audit, "how often players with each injury label actually played"),
 }
 
 

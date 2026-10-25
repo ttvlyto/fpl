@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from .availability import LabelTable, apply_labels, chance_for, fpl_bucket, fpl_stale, is_hard_out, slp_bucket
+from .availability import (LabelTable, apply_labels, chance_for, fpl_bucket, fpl_stale, hard_out_weeks, is_hard_out,
+                           load_counts, rebuild_label_counts, slp_bucket)
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
 from .gameweek import MATCH_LENGTH, live_gameweek, season_of, target_gameweek, team_fixtures
@@ -347,8 +348,10 @@ class _MinutesInputs:
         self.rows = season_rows(conn, season, last_finished) if self.model else {}
         self.regular = regular_weeks(self.rows)
         self.before = (last_finished or 0) + 1
-        self.table = LabelTable(k=cfg.label_prior_k)
-        self.excluded = {}       # sleeper id -> weeks FPL had him out (filled from label history)
+        if self.model:
+            rebuild_label_counts(conn, season, last_finished, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        self.table = LabelTable(load_counts(conn, season), k=cfg.label_prior_k)
+        self.excluded = hard_out_weeks(conn, season)     # sleeper id -> weeks FPL had him out
         self._season, self._conn, self._last = season, conn, None
         self.club_last = {}
         for f in fixtures:

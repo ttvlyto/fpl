@@ -9,7 +9,11 @@ P(start) and P(appear). The starting values are guesses from the research
 league's own outcomes as weeks finish.
 """
 
+from datetime import timedelta
+
 from .gameweek import parse_time
+from .metrics import wilson
+from .minutes import regular_weeks, season_rows
 
 HARD_OUT = {"s", "u", "n", "i0", "d0"}
 # (relative risk of starting, of appearing) against an unflagged player.
@@ -20,6 +24,9 @@ SLP_PRIOR = {("a100", "out"): (0.80, 0.95), ("a100", "gtd"): (0.90, 1.00), ("fla
              ("a100", "sus"): (0.50, 0.50)}
 SHORT_DOUBTS = {"d75", "d50", "i75", "i50"}   # labels that describe one match; a long injury stays flagged
 STALE_SLEEPER_CAP = 0.60
+POOL_BELOW = 30          # an FPL bucket with fewer rows borrows its d/i twin's counts
+RR_CAP = 1.2
+MAX_LABEL_AGE = timedelta(hours=72)
 
 
 def chance_for(el, deadline_passed):
@@ -58,7 +65,8 @@ def _nearest(bucket):
 
 
 class LabelTable:
-    """Relative risks per label; `counts` (learned outcomes) are folded in by later code."""
+    """Relative risks per label. Each learns from logged outcomes as observed over expected:
+    RR = (O + k·prior) / (E + k), where E sums the probabilities the layer before gave those players."""
 
     def __init__(self, counts=None, k=20):
         self.counts = counts or {}
@@ -67,11 +75,26 @@ class LabelTable:
     def prior_fpl(self, bucket):
         return FPL_PRIOR.get(bucket) or _nearest(bucket)
 
+    def _learn(self, prior, c):
+        if not c:
+            return prior
+        rs = (c["starts"] + self.k * prior[0]) / (c["e_start"] + self.k)
+        ra = (c["apps"] + self.k * prior[1]) / (c["e_app"] + self.k)
+        return (min(RR_CAP, max(0.0, rs)), min(RR_CAP, max(0.0, ra)))
+
     def rr_fpl(self, bucket):
-        return self.prior_fpl(bucket)
+        c = self.counts.get(("fpl", bucket))
+        if bucket != "a100" and c and c["n"] < POOL_BELOW:
+            twin = self.counts.get(("fpl", ("i" if bucket[0] == "d" else "d") + bucket[1:]))
+            if twin:
+                c = {k: c[k] + twin[k] for k in c}
+        return self._learn(self.prior_fpl(bucket), c)
 
     def rr_slp(self, fpl_bucket_, slp):
-        return SLP_PRIOR.get((fpl_side(fpl_bucket_), slp), (1.0, 1.0))
+        key = (fpl_side(fpl_bucket_), slp)
+        if key not in SLP_PRIOR:
+            return (1.0, 1.0)     # no reason to adjust, and never learned
+        return self._learn(SLP_PRIOR[key], self.counts.get(("sleeper", f"{key[0]}+{slp}")))
 
 
 def fpl_stale(news_added, club_last_kickoff):
@@ -95,3 +118,91 @@ def apply_labels(p_start, p_app, fpl_b, slp_b, stale, table, weight):
     ss, sa = 1 - weight * (1 - ss), 1 - weight * (1 - sa)
     ps = min(1.0, ps_fpl * ss)
     return (ps_fpl, pa_fpl, ps, max(ps, min(1.0, pa_fpl * sa)))
+
+
+def _last_logged(conn, season, max_gw=None):
+    """{(gw, sleeper id): row} for each player's last projection_log row before his kickoff that carries labels."""
+    out = {}
+    for row in conn.execute(
+            "SELECT gw, sleeper_id, kickoff, fpl_bucket, slp_bucket, p_start_model, p_app_model, p_start_fpl, "
+            "p_app_fpl, label_at FROM projection_log WHERE season = ? AND fpl_bucket IS NOT NULL "
+            "AND p_start_model IS NOT NULL AND kickoff IS NOT NULL AND made_at <= kickoff "
+            "AND (? IS NULL OR gw <= ?) ORDER BY made_at", (season, max_gw, max_gw)):
+        out[(row[0], row[1])] = row
+    return out
+
+
+def hard_out_weeks(conn, season):
+    """{sleeper id: weeks FPL had him hard out before kickoff}: left out of his minutes history."""
+    out = {}
+    for (gw, sid), row in _last_logged(conn, season).items():
+        if is_hard_out(row[3]):
+            out.setdefault(sid, set()).add(gw)
+    return out
+
+
+def rebuild_label_counts(conn, season, last_finished, built_at):
+    """Count, per label, how often logged players started and played against what was expected."""
+    if last_finished is None:
+        return 0
+    rows = season_rows(conn, season, last_finished)
+    regular = regular_weeks(rows)
+    cells = {}
+    for (gw, sid), (_, _, kickoff, fb, sb, psm, pam, psf, paf, label_at) in _last_logged(conn, season,
+                                                                                        last_finished).items():
+        k, at = parse_time(kickoff), parse_time(label_at)
+        if gw not in rows or gw not in regular or not k or not at or k - at > MAX_LABEL_AGE:
+            continue
+        st = rows[gw].get(sid) or {}
+        minutes = st.get("min") or 0
+        outcome = ((st.get("gs") or 0) >= 1, minutes > 0, minutes >= 60)
+        for key, e in ((("fpl", fb), (psm, pam)), (("sleeper", f"{fpl_side(fb)}+{sb}"), (psf or 0.0, paf or 0.0))):
+            c = cells.setdefault(key, {"n": 0, "starts": 0, "apps": 0, "sixty": 0, "e_start": 0.0, "e_app": 0.0})
+            c["n"] += 1
+            c["starts"] += outcome[0]
+            c["apps"] += outcome[1]
+            c["sixty"] += outcome[2]
+            c["e_start"] += e[0]
+            c["e_app"] += e[1]
+    with conn:
+        conn.execute("DELETE FROM label_counts WHERE season = ?", (season,))
+        conn.executemany("INSERT INTO label_counts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         [(season, kind, cell, c["n"], c["starts"], c["apps"], c["sixty"], c["e_start"], c["e_app"],
+                           built_at) for (kind, cell), c in cells.items()])
+    return len(cells)
+
+
+def load_counts(conn, season):
+    return {(kind, cell): {"n": n, "starts": st, "apps": ap, "sixty": sx, "e_start": es, "e_app": ea}
+            for kind, cell, n, st, ap, sx, es, ea in conn.execute(
+                "SELECT kind, cell, n, starts, apps, sixty, e_start, e_app FROM label_counts WHERE season = ?",
+                (season,))}
+
+
+_LEAD = ("sleeper", "a100+out")
+
+
+def audit_rows(conn, season):
+    """Per label: how often players started, played (with a 90% range) and reached 60 minutes."""
+    out = []
+    for (kind, cell), c in load_counts(conn, season).items():
+        lo, hi = wilson(c["apps"], c["n"])
+        out.append({"kind": kind, "cell": cell, "n": c["n"], "start_rate": c["starts"] / c["n"],
+                    "app_rate": c["apps"] / c["n"], "sixty_rate": c["sixty"] / c["n"], "app_lo": lo, "app_hi": hi})
+    return sorted(out, key=lambda r: ((r["kind"], r["cell"]) != _LEAD, r["kind"], r["cell"]))
+
+
+def _line(r):
+    return (f"  {r['cell']:<16} players {r['n']:>4}  started {r['start_rate']:4.0%}  played {r['app_rate']:4.0%} "
+            f"({r['app_lo']:.0%}–{r['app_hi']:.0%})  60+ {r['sixty_rate']:4.0%}")
+
+
+def format_audit(rows):
+    lead = [r for r in rows if (r["kind"], r["cell"]) == _LEAD]
+    lines = ["Sleeper says Out, FPL says available"] + ([_line(r) for r in lead] or ["  no players yet"])
+    for kind, title in (("fpl", "FPL labels"), ("sleeper", "Sleeper labels, on top of FPL's")):
+        group = [r for r in rows if r["kind"] == kind and (kind, r["cell"]) != _LEAD]
+        if group:
+            lines += [title] + [_line(r) for r in group]
+    lines.append("Ranges are 90% intervals; few players means a wide range.")
+    return "\n".join(lines)
