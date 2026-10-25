@@ -10,6 +10,7 @@ import json
 from .availability import chance_for
 from .db import latest
 from .headtohead import all_results, form, head_to_head, season_results
+from .lineup import _eligible, best_xi
 from .report import BuildError, build_report
 from .sleeper_stats import sleeper_points
 
@@ -109,3 +110,70 @@ def build_packet(conn, cfg, now):
         "fixtures": fixtures,
     }
     return packet, c
+
+
+def _obj(props):
+    return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
+
+
+_STR = {"type": "string"}
+ANSWER_SCHEMA = _obj({
+    "summary": _STR,
+    "xi": {"type": "array", "items": _obj({"player_id": _STR, "slot": _STR, "reason": _STR})},
+    "swaps": {"type": "array", "items": _obj({"drop_id": _STR, "add_id": _STR, "reason": _STR})},
+    "matchup_notes": {"type": "array", "items": _obj({"fixture": _STR, "note": _STR})},
+})
+
+
+def validate_answer(answer, packet, context, eligibility):
+    """Everything wrong with Claude's answer under the league's rules, as readable lines ([] if it's legal).
+    The XI is picked from the roster after Claude's own swaps."""
+    ctx = context["ctx"]
+    roster = {p["id"]: p for p in packet["roster"]}
+    free = {p["id"] for p in packet["free_agents"]}
+    problems = []
+    swaps = answer.get("swaps") or []
+    if len(swaps) > packet["max_swaps"]:
+        problems.append(f"{len(swaps)} swaps; at most {packet['max_swaps']} are allowed")
+    drops, adds = set(), set()
+    for s in swaps:
+        d, a = s.get("drop_id"), s.get("add_id")
+        if d not in roster:
+            problems.append(f"drop {d!r} is not on the roster")
+        elif roster[d].get("ir") or roster[d].get("undroppable"):
+            problems.append(f"drop {d!r} can't be dropped (on IR or marked undroppable)")
+        if a not in free:
+            problems.append(f"add {a!r} is not one of the listed free agents")
+        if d in drops or a in adds:
+            problems.append(f"swap {d!r} -> {a!r} repeats a player used in another swap")
+        drops.add(d)
+        adds.add(a)
+    if drops & adds:
+        problems.append(f"players both dropped and added: {', '.join(sorted(drops & adds))}")
+
+    pool = {pid: ctx[pid] for pid in roster if pid in ctx and pid not in drops and not ctx[pid].in_reserve}
+    pool.update({pid: ctx[pid] for pid in adds if pid in free and pid in ctx})
+    left = list(packet["slots"])
+    seen = set()
+    for entry in answer.get("xi") or []:
+        pid, slot = entry.get("player_id"), entry.get("slot")
+        if pid in seen:
+            problems.append(f"{pid!r} is in the XI twice")
+            continue
+        seen.add(pid)
+        if slot not in left:
+            problems.append(f"slot {slot!r} isn't one of the league's open starting slots {packet['slots']}")
+        else:
+            left.remove(slot)
+        if pid in drops:
+            problems.append(f"{pid!r} starts but is dropped in your swaps")
+        elif pid in roster and ctx.get(pid) is not None and ctx[pid].in_reserve:
+            problems.append(f"{pid!r} is on IR and can't start")
+        elif pid not in pool:
+            problems.append(f"{pid!r} is not on the roster after your swaps")
+        elif slot in eligibility and not _eligible(pool[pid], slot, eligibility):
+            problems.append(f"{pid!r} ({'/'.join(pool[pid].positions)}) can't play slot {slot!r}")
+    can_leave = len(best_xi(list(pool.values()), packet["slots"], eligibility).empty_slots)
+    if len(left) > can_leave:
+        problems.append(f"slots left empty: {', '.join(left)}; your roster after swaps can fill all but {can_leave}")
+    return problems

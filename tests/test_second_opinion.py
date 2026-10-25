@@ -97,3 +97,85 @@ class PacketTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from sleeperfpl.models import PlayerCtx  # noqa: E402
+
+ELIG = {"GK": ["GK"], "MID": ["MID"], "FWD": ["FWD"]}
+
+
+def pc(pid, pos, on_roster=True, ir=False, undroppable=False):
+    return PlayerCtx(sleeper_id=pid, name=f"Player {pid}", positions=[pos], club="ARS", fpl_id=1,
+                     on_roster=on_roster, in_reserve=ir, undroppable=undroppable)
+
+
+def setup(slots=("GK", "MID", "MID"), extra=()):
+    players = [pc("g", "GK"), pc("m1", "MID"), pc("m2", "MID"), pc("m3", "MID"), pc("ir", "MID", ir=True),
+               pc("keep", "MID", undroppable=True), pc("fa", "MID", on_roster=False),
+               pc("fa2", "FWD", on_roster=False), *extra]
+    ctx = {p.sleeper_id: p for p in players}
+    packet = {"slots": list(slots), "max_swaps": 2,
+              "roster": [{"id": p.sleeper_id, "ir": p.in_reserve, "undroppable": p.undroppable}
+                         for p in players if p.on_roster],
+              "free_agents": [{"id": p.sleeper_id} for p in players if not p.on_roster]}
+    return packet, {"ctx": ctx}
+
+
+def answer(xi, swaps=()):
+    return {"summary": "s", "matchup_notes": [],
+            "xi": [{"player_id": pid, "slot": slot, "reason": "r"} for slot, pid in xi],
+            "swaps": [{"drop_id": d, "add_id": a, "reason": "r"} for d, a in swaps]}
+
+
+class ValidateTests(unittest.TestCase):
+    def check(self, ans, slots=("GK", "MID", "MID"), extra=()):
+        packet, context = setup(slots, extra)
+        return so.validate_answer(ans, packet, context, ELIG)
+
+    def test_valid_answer_has_no_problems(self):
+        self.assertEqual(self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "m2")])), [])
+
+    def test_xi_may_start_own_add_but_not_own_drop(self):
+        self.assertEqual(self.check(answer([("GK", "g"), ("MID", "fa"), ("MID", "m2")], [("m1", "fa")])), [])
+        problems = self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "fa")], [("m1", "fa")]))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("m1", problems[0])
+
+    def test_unknown_id_and_bad_slot_reported_together(self):
+        problems = self.check(answer([("GK", "g"), ("MID", "zz"), ("DEF", "m2")]))
+        self.assertEqual(len(problems), 3)   # plus the MID slot the bad entry left empty
+        self.assertTrue(any("empty" in p for p in problems))
+        self.assertTrue(any("zz" in p for p in problems))
+        self.assertTrue(any("DEF" in p for p in problems))
+
+    def test_too_many_swaps(self):
+        problems = self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "m2")],
+                                     [("m3", "fa"), ("m2", "fa2"), ("m1", "fa3")]))
+        self.assertTrue(any("swaps" in p for p in problems))
+
+    def test_undroppable_and_ir_drop_rejected(self):
+        problems = self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "m2")], [("keep", "fa"), ("ir", "fa2")]))
+        self.assertEqual(len(problems), 2)
+
+    def test_add_must_be_a_listed_free_agent(self):
+        problems = self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "m2")], [("m3", "m1")]))
+        self.assertTrue(problems)
+
+    def test_ineligible_and_reserve_starters(self):
+        problems = self.check(answer([("GK", "m3"), ("MID", "ir"), ("MID", "m2")]))
+        self.assertEqual(len(problems), 2)
+
+    def test_empty_slot_allowed_only_when_roster_cannot_fill_it(self):
+        self.assertEqual(self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "m2")]),
+                                    slots=("GK", "MID", "MID", "FWD")), [])
+        problems = self.check(answer([("GK", "g"), ("MID", "m1")]))
+        self.assertTrue(any("empty" in p for p in problems))
+
+    def test_duplicate_player_in_xi(self):
+        problems = self.check(answer([("GK", "g"), ("MID", "m1"), ("MID", "m1")]))
+        self.assertTrue(any("twice" in p for p in problems))
+
+    def test_schema_requires_every_field(self):
+        self.assertEqual(set(so.ANSWER_SCHEMA["required"]), {"summary", "xi", "swaps", "matchup_notes"})
+        self.assertFalse(so.ANSWER_SCHEMA["additionalProperties"])
+        self.assertFalse(so.ANSWER_SCHEMA["properties"]["xi"]["items"]["additionalProperties"])
