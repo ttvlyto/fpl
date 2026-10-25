@@ -1,7 +1,7 @@
 # Expected Minutes: Design
 
 Date: 2026-10-24
-Status: awaiting owner review
+Status: approved by owner 2026-10-24
 Builds on: `2026-10-24-report-card-backtest-design.md` (shipped). Project 2 of
 the accuracy roadmap.
 Research input: "Replace hard zeros with calibrated minutes scenarios", pasted
