@@ -28,7 +28,9 @@ code layout.
 - your **best starting XI**, using only lineups your league's roster slots allow;
 - **swap tips**, either an XI gain ("Drop X, add Y: +1.9 projected") or a
   "bench upgrade" (its gain is measured on the average/projection blend, not
-  "projected"; `swap_min_gain` applies to both), labelled as waiver claims
+  "projected"; `swap_min_gain` applies to both). When several drops give the
+  same gain, the tip drops the player with the lowest projection. Tips are
+  labelled as waiver claims
   once the game week has started (players are instant free agents until the
   week's first kickoff, then go through waivers);
 - the **top free agents** per position, with Sleeper trending adds;
@@ -247,6 +249,7 @@ default. Unknown keys are silently ignored. `config.json` is git-ignored.
 | `minutes_model` | `"shadow"` | `"shadow"`: minutes estimates are logged and shown only; `"on"`: v1m/v2m drive picks |
 | `label_prior_k` | 20 | how many pseudo-players stand behind each label's starting guess before this league's outcomes take over |
 | `sleeper_label_weight` | 1.0 | 0 to 1: how much Sleeper's injury labels move the minutes estimate (0 ignores them) |
+| `minutes_shrink_k` | 3 | how many 90-minute matches of the position's average stand behind each player's v1m/v2m points per 90, so a player with a few minutes doesn't get an absurd rate (0 turns it off) |
 
 ## `scoring_map.json`
 
@@ -359,14 +362,12 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
   both matches. Injury labels can't be backtested (no history of them before
   2026-10-24), and the label table starts from guesses until this league's
   outcomes build up.
-- **Known bug: v1m per-90 spikes on tiny minutes.** v1m's points per 90 are
-  a plain ratio (points divided by minutes, times 90, with no shrinkage), so a
-  player with very few minutes gets an absurd rate. Observed on real data: a
-  player (Carvalho) with about 3 minutes and a goal produced a v1m projection of 38.3.
-  Shadow only today, but
-  don't set `minutes_model: "on"` until it's fixed: pull per-90 rates toward the
-  position average with about 3 pseudo-90s (`projection.minutes_rates`,
-  `projection_v2.v2m_inputs`). Likely part of why v1m lost early 2026 weeks.
+- **Per-90 shrinkage is one number for every stat.** v1m and v2m pull each
+  player's points per 90 toward his position's pooled average with
+  `minutes_shrink_k` pseudo-90s (default 3), so a goal in 3 minutes no longer
+  projects 38 points. The average is pooled over all of a position's players,
+  not by team or role, and `k` is the same for every stat. In the backtest,
+  k = 3 and k = 6 scored about the same; k = 0 (no shrinkage) lost to v1 in 2026.
 - **No rollback past this version.** The database gains columns that older
   code can't write to; going back to an older version needs a database backup
   from before the upgrade.

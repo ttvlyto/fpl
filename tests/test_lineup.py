@@ -162,6 +162,15 @@ class ReviewFixLineupTests(unittest.TestCase):
         self.assertNotIn("D1", [t.drop.sleeper_id for t in tips])
 
 
+class DropChoiceTests(unittest.TestCase):
+    def test_equal_gain_drops_lowest_projection_not_first_name(self):
+        # Either drop benches the same weakest starter, so the gain ties; drop the weaker player.
+        roster = [p("S", "MID", 5), p("A", "MID", 4), p("Z", "MID", -0.4)]
+        tips = swap_tips(roster, [fa("F", "MID", 9)], ["MID"], ELIG, 1.0, 3)
+        self.assertEqual([(t.drop.sleeper_id, t.add.sleeper_id) for t in tips], [("Z", "F")])
+        self.assertAlmostEqual(tips[0].gain, 4)
+
+
 class UndroppableTests(unittest.TestCase):
     def test_undroppable_never_suggested_as_drop(self):
         keep = p("S", "MID", 0)

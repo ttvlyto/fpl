@@ -22,7 +22,8 @@ from .metrics import (Scored, brier, category, error_summary, mean, mean_ci, pai
 from .minutes import (FixtureMinutes, fixture_minutes, history, last_season_start_share, player_minutes,
                       regular_weeks)
 from .minutes_fit import all_rows, earlier, fit_rows, load_default, pos_of_players
-from .projection import minutes_rates, project, project_minutes
+from .projection import PositionRates, minutes_rates, project, project_minutes
+from .projection_v2 import SLEEPER_PREFIX
 from .scoring_map import flatten_scoring_settings
 from .sleeper_stats import irregular_week, sleeper_points
 
@@ -46,6 +47,7 @@ class BacktestInput:
     season: str = ""
     gw: int = 0
     minutes: list | None = None   # one FixtureMinutes per week-g fixture; None without a minutes model
+    prior: object = None          # projection.Prior for his position from earlier weeks; None = no shrinkage
 
 
 def _v1(inp, cfg):
@@ -63,10 +65,16 @@ def _mults(inp, cfg):
     return [multipliers[d] for d in inp.difficulties]
 
 
+def _rates(inp, cfg):
+    k = cfg.minutes_shrink_k if inp.prior else 0.0
+    return minutes_rates([s for _, s in inp.weeks if _played(s)][:cfg.avg_window], inp.scoring,
+                         inp.prior.lin90 if inp.prior else 0.0, k)
+
+
 def _v1m(inp, cfg):
     if inp.minutes is None:
         return None
-    lin90, cs60 = minutes_rates([s for _, s in inp.weeks if _played(s)][:cfg.avg_window], inp.scoring)
+    lin90, cs60 = _rates(inp, cfg)
     return project_minutes(lin90, cs60, inp.minutes, _mults(inp, cfg))
 
 
@@ -172,7 +180,11 @@ def run_backtest(conn, cfg, seasons=None, minutes=False):
         prev_rows = by_season.get(str(int(season) - 1), {}) if season.isdigit() else {}
         train, train_short = all_rows(conn, train_pos, [s for s in stored if s <= season])
         prev_fit = None
+        rates, pooled = PositionRates(scoring), 0
         for gw in range(2, last + 1):
+            for w in range(pooled + 1, gw):
+                rates.add(stats.get(w, {}))
+            pooled = gw - 1
             rows = stats.get(gw)
             if not rows:
                 continue
@@ -195,7 +207,8 @@ def run_backtest(conn, cfg, seasons=None, minutes=False):
                 difficulties = [f.difficulty for f in by_club.get(c, [])] if c else [NEUTRAL]
                 inp = BacktestInput(pid, pos_of[pid], prior,
                                     [sleeper_points(s, scoring) for _, s in prior if _played(s)],
-                                    difficulties, scoring, season, gw)
+                                    difficulties, scoring, season, gw,
+                                    prior=rates.prior(SLEEPER_PREFIX.get(pos_of[pid], "")))
                 actual_stats = rows.get(pid)
                 pts = sleeper_points(actual_stats, scoring) if actual_stats else 0.0
                 cat = category(actual_stats, pts, cfg.category_low, cfg.category_haul)
@@ -220,7 +233,7 @@ def run_backtest(conn, cfg, seasons=None, minutes=False):
                 minutes_played = float(st.get("min") or 0)
                 if len(difficulties) == 1:
                     certain = FixtureMinutes([(minutes_played, 1.0)], 0.0, 0.0, minutes_played)
-                    lin90, cs60 = minutes_rates([s for _, s in prior if _played(s)][:cfg.avg_window], scoring)
+                    lin90, cs60 = _rates(inp, cfg)
                     week_oracle.append((abs(_v1m(inp, cfg) - pts),
                                         abs(project_minutes(lin90, cs60, [certain], _mults(inp, cfg)) - pts)))
                 recent = hist[-POPULATION_WINDOW:]

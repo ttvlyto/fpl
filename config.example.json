@@ -75,5 +75,6 @@
   "category_haul": 10,
   "minutes_model": "shadow",
   "label_prior_k": 20,
-  "sleeper_label_weight": 1.0
+  "sleeper_label_weight": 1.0,
+  "minutes_shrink_k": 3
 }

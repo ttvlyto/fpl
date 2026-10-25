@@ -41,6 +41,7 @@ DEFAULTS = {
     "minutes_model": "shadow",
     "label_prior_k": 20,           # pseudo-observations behind each label's starting guess
     "sleeper_label_weight": 1.0,   # 0 ignores Sleeper's injury labels in the minutes model
+    "minutes_shrink_k": 3,         # pseudo-90s pulling v1m/v2m per-90 rates toward the position average
 }
 MINUTES_MODES = ("shadow", "on")
 STATS_SOURCES = ("sleeper", "fpl")
@@ -81,6 +82,7 @@ class Config:
     minutes_model: str = "shadow"
     label_prior_k: float = 20
     sleeper_label_weight: float = 1.0
+    minutes_shrink_k: float = 3
 
 
 def load_config(path: str | None = None) -> Config:
@@ -136,6 +138,7 @@ def load_config(path: str | None = None) -> Config:
             minutes_model=merged["minutes_model"],
             label_prior_k=float(merged["label_prior_k"]),
             sleeper_label_weight=float(merged["sleeper_label_weight"]),
+            minutes_shrink_k=float(merged["minutes_shrink_k"]),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:

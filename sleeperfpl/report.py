@@ -26,7 +26,7 @@ from .minutes import fixture_minutes, history, last_season_start_share, player_m
 from .minutes_fit import load_model
 from .models import PlayerCtx
 from .pricing import fixture_odds
-from .projection import minutes_rates, project, project_minutes
+from .projection import PositionRates, minutes_rates, project, project_minutes
 from .projection_v2 import SLEEPER_PREFIX, project_v2, project_v2m, v2_inputs, v2m_inputs
 from .report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_decisions,
                           score_matches, score_weeks, summary)
@@ -188,7 +188,8 @@ def build_report(conn, cfg, now):
     trending = {t["player_id"]: t["count"] for t in _rows(conn, "sleeper_trending")}
 
     my_ids, reserve = set(mine["players"]), set(mine["reserve"])
-    mins = _MinutesInputs(conn, cfg, sleeper_season, last_finished, fixtures, teams, now) if use_sleeper else None
+    mins = (_MinutesInputs(conn, cfg, sleeper_season, last_finished, fixtures, teams, now, scoring)
+            if use_sleeper else None)
     ctx = {}
     for p in players:
         sid = p["player_id"]
@@ -344,9 +345,12 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
 class _MinutesInputs:
     """What every player's minutes estimate needs, loaded once per build."""
 
-    def __init__(self, conn, cfg, season, last_finished, fixtures, teams, now):
+    def __init__(self, conn, cfg, season, last_finished, fixtures, teams, now, scoring):
         self.model = load_model(conn)
         self.rows = season_rows(conn, season, last_finished) if self.model else {}
+        self.rates = PositionRates(scoring)
+        for rows in self.rows.values():
+            self.rates.add(rows)
         self.regular = regular_weeks(self.rows)
         self.before = (last_finished or 0) + 1
         if self.model:
@@ -384,10 +388,13 @@ def _apply_minutes(pl, pos, sp, el, weeks, scoring, fodds, baseline, cfg, mins, 
     fm = fixture_minutes(pl.p_start, pl.p_app, pm.start_buckets, pm.sub_buckets)
     pl.p60, pl.e_min = fm.p60, fm.e_min
     recent = weeks[:cfg.avg_window]
-    lin90, cs60 = minutes_rates(recent, scoring)
+    prefix = SLEEPER_PREFIX.get(pos, "")
+    prior = mins.rates.prior(prefix)
+    k = cfg.minutes_shrink_k if prior else 0.0
+    lin90, cs60 = minutes_rates(recent, scoring, prior.lin90 if prior else 0.0, k)
     mults = [cfg.difficulty_multipliers[f.difficulty] for f in pl.fixtures]
     pl.proj_v1m = project_minutes(lin90, cs60, [fm] * len(pl.fixtures), mults)
-    inp = v2m_inputs(weeks, scoring, SLEEPER_PREFIX.get(pos, ""), cfg.avg_window)
+    inp = v2m_inputs(weeks, scoring, prefix, cfg.avg_window, (prior.att90, prior.other90) if prior else (0.0, 0.0), k)
     if pl.proj_source == "market" and inp:
         parts = []
         for f, mult in zip(pl.fixtures, mults):

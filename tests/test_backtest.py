@@ -13,7 +13,7 @@ from sleeperfpl.backtest import METHODS, format_backtest, run_backtest
 from sleeperfpl.db import connect
 
 CFG = SimpleNamespace(difficulty_multipliers={1: 1.2, 2: 1.1, 3: 1.0, 4: 0.9, 5: 0.8}, avg_window=5,
-                      category_low=3, category_haul=10, overrides_path=Path("/nonexistent/overrides.json"))
+                      category_low=3, category_haul=10, minutes_shrink_k=3, overrides_path=Path("/nonexistent/overrides.json"))
 
 
 def seed_league(conn, season="2026"):
@@ -51,6 +51,19 @@ class BacktestTests(unittest.TestCase):
 
     def week(self, result, gw, season="2025"):
         return next(w for w in result["seasons"][season]["weeks"] if w["gw"] == gw)
+
+    def test_v1m_prior_from_earlier_weeks_only(self):
+        self.teams(range(1, 4))
+        for pid, goals in (("p1", 1), ("p2", 0)):
+            for w in range(1, 4):
+                self.conn.execute("INSERT OR REPLACE INTO sleeper_stats VALUES ('2025', ?, ?, ?, 'x')",
+                                  (w, pid, json.dumps({"min": 90, "pos_m_min": 90, "pos_m_g": goals * w})))
+        seen, patch = self.spy()
+        with patch:
+            run_backtest(self.conn, CFG, ["2025"])
+        by_gw = {i.gw: i.prior for i in seen if i.sleeper_id == "p1"}
+        self.assertAlmostEqual(by_gw[2].lin90, 5 / 2)             # week 1 only: 5 points over 180 minutes
+        self.assertAlmostEqual(by_gw[3].lin90, (5 + 10) / 4)      # weeks 1-2, never week 3
 
     def test_no_future_leak(self):
         self.teams(range(1, 5))

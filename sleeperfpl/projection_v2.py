@@ -75,14 +75,17 @@ def project_v2(inp, own_lam, opp_lam, team_baseline):
     return defensive + attacking + inp.other_avg
 
 
-def v2m_inputs(weeks, scoring, prefix, window):
-    """Per-90 attacking and other points over a player's recent played weeks; None if none."""
+def v2m_inputs(weeks, scoring, prefix, window, prior=(0.0, 0.0), k=0.0):
+    """Per-90 attacking and other points over a player's recent played weeks; None if none.
+    Each rate is pulled toward `prior` (att90, other90) with `k` pseudo-90s."""
     recent = weeks[:window]
     minutes = sum(float(w.get("min") or 0) for w in recent)
     if not recent or minutes <= 0:
         return None
     parts = [split_points(w, scoring) for w in recent]
-    return V2mInputs(att90=sum(p[1] for p in parts) / minutes * 90, other90=sum(p[2] for p in parts) / minutes * 90,
+    n90 = minutes / 90 + k
+    return V2mInputs(att90=(sum(p[1] for p in parts) + prior[0] * k) / n90,
+                     other90=(sum(p[2] for p in parts) + prior[1] * k) / n90,
                      cs_points=scoring.get(prefix + "cs", 0), ga_points=scoring.get(prefix + "ga", 0))
 
 

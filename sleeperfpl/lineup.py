@@ -143,7 +143,9 @@ def swap_tips(roster, free_agents, slots, eligibility, min_gain, max_swaps):
             elif d.sleeper_id in bench_ids and a.value() - d.value() >= min_gain:
                 candidates.append(Swap(d, a, a.value() - d.value(), "bench"))
 
-    candidates.sort(key=lambda s: (s.kind != "xi", -s.gain, s.drop.name, s.add.name))
+    # Drops that bench the same starter tie on gain; then drop the weakest player, not the first name.
+    candidates.sort(key=lambda s: (s.kind != "xi", -round(s.gain, 6), s.drop.proj, s.drop.value(),
+                                   s.drop.name, s.add.name))
     tips, used_drop, used_add = [], set(), set()
     for s in candidates:
         if len(tips) >= max_swaps:

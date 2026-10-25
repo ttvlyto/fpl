@@ -129,8 +129,8 @@ swapped for a bench player whose match hasn't started.
   label actually played.
 
 The `minutes_model` config key defaults to `"shadow"`: minutes estimates are
-shown and logged but don't change picks. Leave it there for now (there is a
-known issue with players who have very few minutes; see docs/README.md).
+shown and logged but don't change picks. Set it to `"on"` to let them drive the
+XI and swap tips.
 
 ### 7. Run it automatically
 

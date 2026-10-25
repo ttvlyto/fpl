@@ -48,6 +48,12 @@ class V2mTests(unittest.TestCase):
         self.assertEqual((inp.cs_points, inp.ga_points), (6, -2))
         self.assertIsNone(v2m_inputs([], SC, "pos_d_", 5))
 
+    def test_v2m_inputs_shrink_toward_prior(self):
+        weeks = [{"min": 3, "pos_d_g": 1}]
+        inp = v2m_inputs(weeks, SC, "pos_d_", 5, prior=(2.0, 1.0), k=3.0)
+        self.assertAlmostEqual(inp.att90, (10 + 2.0 * 3) / (3 / 90 + 3))
+        self.assertAlmostEqual(inp.other90, (0 + 1.0 * 3) / (3 / 90 + 3))
+
     def test_project_v2m_defender(self):
         full = FixtureMinutes([(90, 1.0)], 1.0, 1.0, 90.0)
         m = V2mInputs(att90=1.0, other90=3.0, cs_points=6, ga_points=-2)
