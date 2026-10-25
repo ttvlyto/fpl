@@ -248,7 +248,8 @@ def build_report(conn, cfg, now, *, log=True, context=None):
                        match=dict(match.mapping), slots=slots, scoring=scoring, season=sleeper_season,
                        last_finished=last_finished, gw=gw, mine=mine, taken=taken,
                        fixtures=[f for f in fixtures if gw.gw and f.get("event") == gw.gw], teams=teams,
-                       fodds=fodds, lineup=lineup, swaps=swaps, use_sleeper=use_sleeper)
+                       fodds=fodds, lineup=lineup, swaps=swaps, use_sleeper=use_sleeper,
+                       deadline_passed=deadline_passed)
 
     made_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     if log and use_sleeper and gw.gw:
