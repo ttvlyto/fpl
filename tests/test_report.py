@@ -600,6 +600,16 @@ class MatchupPageTests(MatchupReportTests):
             self.assertIn(cls, CSS)
         self.assertIn("min-height:44px", CSS)
 
+    def test_matchup_header_fits_a_phone(self):
+        from sleeperfpl.report import CSS
+        page = render_html(self.build())
+        teams = page[page.index('class="teams">'):page.index('<div class="muted sub">')]
+        self.assertNotIn("projected, best lineups", teams)      # subtitle sits below the grid, not in it
+        self.assertIn('class="muted tmeta"', teams)
+        self.assertIn(".tmeta{", CSS)
+        self.assertIn("overflow-wrap:anywhere", CSS[CSS.index(".tmeta{"):])
+        self.assertIn("@media (max-width:480px)", CSS)
+
     def test_page_notice_only(self):
         page = render_html(self.build(schedule={"start_gw": 9, "end_gw": 31, "opponents": ["Nobody"]}))
         self.assertIn("Nobody", page)
@@ -813,6 +823,14 @@ class LiveMatchupTests(LiveReportTests):
 
 
 class LiveMatchupPageTests(LiveMatchupTests):
+    def test_page_live_to_play_shows_kickoff(self):
+        r = build_report(self.conn, self.cfg, self.AFTER)
+        st = r["matchup"]["them"]["starters"][1]
+        st.update(state="to_play", points=0.0, kickoff="2026-10-24T16:30:00Z")
+        page = render_html(r)
+        self.assertIn('to play <time datetime="2026-10-24T16:30:00Z"', page)
+        self.assertIn('data-fmt="short"', page)
+
     def test_page_live_mode(self):
         page = render_html(build_report(self.conn, self.cfg, self.AFTER))
         self.assertIn("GW9 · live", page)

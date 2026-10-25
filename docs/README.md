@@ -477,8 +477,10 @@ Details of `report.json` worth knowing:
   name matched no team; then `me` and `them` are `null`), `me`, `them` and
   `after_swaps` (your XI total after every suggested swap, projected mode only).
   Each side has `name`, `username`, `record`, `total`, `formation`, `bench`
-  (projected mode) and `starters` (`slot`, `player`, and in live mode `points`
-  and `state`: `done`, `playing` or `to_play`); live sides also have `to_play`.
+  (projected mode) and `starters` (`slot`, `player`, and in live mode `points`,
+  `state` — `done`, `playing`, `to_play`, or `no_match` when his club has no
+  match that week — and `kickoff` for `to_play`); live sides also have
+  `to_play`, the number of starters still to play.
 - `badges` maps each club code to its FPL badge code (`null` until the next
   `fetch-daily`); `club_names` maps it to the full name.
 - `matches` entries always have `fixture_id`, `home`, `away`, `kickoff`,

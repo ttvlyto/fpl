@@ -291,6 +291,7 @@ def build_report(conn, cfg, now, *, log=True, context=None):
     live_inputs = None
     if live_matchup and opp_roster:
         live_inputs = {"states": _club_states(conn, sleeper_season, matchup_gw, fixtures, teams, now, club_of),
+                       "kickoffs": _next_kickoffs(fixtures, teams, matchup_gw, now),
                        "stats": {pid: json.loads(raw) for pid, raw in conn.execute(
                            "SELECT player_id, stats_json FROM sleeper_stats WHERE season = ? AND week = ?",
                            (sleeper_season, matchup_gw))},
@@ -375,12 +376,13 @@ def _set_lineup(ids, slots, lookup, players):
 
 
 def _live_side_dict(user, roster, starters, live):
-    rows, total, to_play = live_side(starters, live["stats"], live["scoring"], live["states"])
+    rows, total, to_play = live_side(starters, live["stats"], live["scoring"], live["states"], live.get("kickoffs"))
     return {"name": team_label(user), "username": user.get("display_name"), "record": record_text(roster),
             "total": round(total, 1), "to_play": to_play,
             "formation": formation([r["pl"].positions for r in rows if r["pl"]]),
             "starters": [{"slot": r["slot"], "player": _player_dict(r["pl"]) if r["pl"] else None,
-                          "points": round(r["points"], 1), "state": r["state"]} for r in rows],
+                          "points": round(r["points"], 1), "state": r["state"], "kickoff": r["kickoff"]}
+                         for r in rows],
             "bench": []}
 
 
@@ -615,6 +617,17 @@ def _club_states(conn, season, gw, fixtures, teams, now, club_of):
     return {c: "done" if c in finished else "playing" if c in started else "to_play" for c in clubs if c}
 
 
+def _next_kickoffs(fixtures, teams, gw, now):
+    """club -> its next kickoff (ISO) in game week `gw`, for clubs whose match hasn't started."""
+    out = {}
+    for f in sorted((f for f in fixtures if f.get("event") == gw and f.get("kickoff_time")),
+                    key=lambda f: f["kickoff_time"]):
+        if parse_time(f["kickoff_time"]) > now:
+            for side in ("team_h", "team_a"):
+                out.setdefault(teams.get(f[side]), f["kickoff_time"])
+    return out
+
+
 def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
                 players_by_id, sleeper_season, fodds, club_of, goal_quotes, log=True):
     gw = live_gameweek(events, fixtures, now)
@@ -697,6 +710,8 @@ background:var(--soft);border:1px solid var(--line);vertical-align:middle;flex-s
 .matchup .eyebrow{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .matchup .teams{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:center;margin-top:8px}
 .tname{font-weight:700;font-size:17px;overflow-wrap:anywhere}
+.tmeta{overflow-wrap:anywhere}
+.matchup .sub{text-align:center;margin-top:4px}
 .score{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-align:center;white-space:nowrap}
 .bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin-top:12px;background:var(--line)}
 .bar .me{background:var(--me)}.bar .them{background:var(--them)}
@@ -717,6 +732,7 @@ border:2px solid var(--pitchline);border-radius:12px;padding:12px 4px;display:fl
 max-width:62px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chip .pp{margin-top:2px;background:#fff;color:#16181d;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px}
 .chip.later .pp{background:rgba(255,255,255,.6)}
+.chip .ko{margin-top:2px;color:#fff;font-size:10px;white-space:nowrap}
 .fx-row{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
 .fx-row .when{font-size:13px;color:var(--muted)}
 .fx-team{display:flex;align-items:center;gap:8px;min-width:0;margin:2px 0}
@@ -725,6 +741,7 @@ max-width:62px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cnts{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:56px}
 .cnt{font-size:12px;font-weight:700}
 .fx-detail{grid-column:2/4;font-size:12px;color:var(--muted)}
+@media (max-width:480px){.score{font-size:24px}.tname{font-size:15px}.matchup .teams{gap:8px}}
 """
 
 PAGE_JS = """
@@ -738,7 +755,9 @@ show(v==='list'?'list':'pitch');
 document.querySelectorAll('[data-view]').forEach(function(b){b.addEventListener('click',function(){
 var w=b.getAttribute('data-view');show(w);try{localStorage.setItem(KEY,w);}catch(e){}});});
 document.querySelectorAll('time[datetime]').forEach(function(t){var d=new Date(t.getAttribute('datetime'));
-if(!isNaN(d))t.textContent=d.toLocaleString(undefined,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});});
+var o=t.getAttribute('data-fmt')==='short'?{weekday:'short',hour:'2-digit',minute:'2-digit'}:
+{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'};
+if(!isNaN(d))t.textContent=d.toLocaleString(undefined,o);});
 })();
 """
 
@@ -1005,7 +1024,7 @@ def _matchup_card(r):
     def team(side, cls, align):
         extra = f' · {side["to_play"]} to play' if live else ""
         return (f'<div style="text-align:{align}"><div class="tname {cls}">{_e(side["name"])}</div>'
-                f'<div class="muted">{_e(side["record"])} · @{_e(side["username"] or "")}{extra}</div></div>')
+                f'<div class="muted tmeta">{_e(side["record"])} · @{_e(side["username"] or "")}{extra}</div></div>')
 
     pos = max(me["total"], 0) + max(them["total"], 0)
     share = 50 if pos <= 0 else round(100 * max(me["total"], 0) / pos)
@@ -1013,9 +1032,8 @@ def _matchup_card(r):
     sub = "points so far, lineups as set in Sleeper" if live else "projected, best lineups"
     out = [f'<div class="card matchup"><div class="eyebrow">{head}</div><div class="teams">',
            team(me, "me", "left"),
-           f'<div><div class="score">{_num(me["total"])} <span class="muted">–</span> {_num(them["total"])}</div>'
-           f'<div class="muted" style="text-align:center">{sub}</div></div>',
-           team(them, "them", "right"), '</div>',
+           f'<div class="score">{_num(me["total"])} <span class="muted">–</span> {_num(them["total"])}</div>',
+           team(them, "them", "right"), '</div>', f'<div class="muted sub">{sub}</div>',
            f'<div class="bar" role="img" aria-label="{_e(_lead(me["total"] - them["total"]))}">'
            f'<div class="me" style="width:{share}%"></div><div class="them" style="width:{100 - share}%"></div></div>']
     line = _lead(me["total"] - them["total"]) + ("." if live else " as things stand.")
@@ -1029,6 +1047,11 @@ def _matchup_card(r):
     return "".join(out)
 
 
+def _kickoff(iso):
+    """A kickoff time the page script shows in the viewer's time zone (UTC without the script)."""
+    return f'<time datetime="{_e(iso)}" data-fmt="short">{_e(iso[11:16])} UTC</time>' if iso else ""
+
+
 def _chip(s, badges, live):
     p = s["player"]
     if p is None:
@@ -1037,8 +1060,9 @@ def _chip(s, badges, live):
     pts = _num(s["points"] if live else p["proj"])
     later = " later" if live and s["state"] == "to_play" else ""
     title = f' title="{_e(p["name"])}{" · to play" if later else ""}"'
+    ko = f'<span class="ko">{_kickoff(s.get("kickoff"))}</span>' if later and s.get("kickoff") else ""
     return (f'<div class="chip{later}"{title}>{_badge(p["club"], badges.get(p["club"]))}'
-            f'<span class="pn">{_e(short)}</span><span class="pp">{pts}</span></div>')
+            f'<span class="pn">{_e(short)}</span><span class="pp">{pts}</span>{ko}</div>')
 
 
 def _pitch(side, cls, badges, live):
@@ -1060,7 +1084,12 @@ def _side_table(side, cls, badges, live):
             rows.append(f'<tr><td>{_e(s["slot"])}</td><td class="muted">empty</td><td></td></tr>')
             continue
         pts = _num(s["points"] if live else p["proj"])
-        state = f' <small>{"to play" if s["state"] == "to_play" else _e(s["state"] or "")}</small>' if live else ""
+        state = ""
+        if live:
+            text = {"to_play": "to play " + _kickoff(s.get("kickoff")), "no_match": "no match"}.get(
+                s["state"], _e(s["state"] or ""))
+            state = f' <small>{text.rstrip()}</small>'
+
         rows.append(f'<tr><td>{_e(s["slot"])}</td><td>{_badge(p["club"], badges.get(p["club"]))} {_e(p["name"])}</td>'
                     f'<td class="num"><b>{pts}</b>{state}</td></tr>')
     for p in side.get("bench") or []:

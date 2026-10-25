@@ -69,9 +69,17 @@ class LiveSideTests(unittest.TestCase):
                          [(9.0, "done"), (0.0, "to_play"), (18.0, "playing"), (0.0, None)])
         self.assertEqual((total, to_play), (27.0, 1))
 
-    def test_unknown_club_is_to_play(self):
-        rows, total, to_play = live_side([("M", SimpleNamespace(sleeper_id="x", club=""))], {}, {}, {})
-        self.assertEqual((rows[0]["state"], total, to_play), ("to_play", 0.0, 1))
+    def test_club_without_a_match_is_not_to_play(self):
+        rows, total, to_play = live_side([("M", SimpleNamespace(sleeper_id="x", club="")),
+                                          ("M", SimpleNamespace(sleeper_id="y", club="WOL"))], {}, {}, {})
+        self.assertEqual([r["state"] for r in rows], ["no_match", "no_match"])
+        self.assertEqual((total, to_play), (0.0, 0))
+
+    def test_to_play_rows_carry_kickoff(self):
+        rows, _, _ = live_side([("M", SimpleNamespace(sleeper_id="b", club="CHE")),
+                                ("M", SimpleNamespace(sleeper_id="a", club="ARS"))], {}, {},
+                               {"CHE": "to_play", "ARS": "done"}, {"CHE": "2026-10-31T15:00:00Z"})
+        self.assertEqual([r["kickoff"] for r in rows], ["2026-10-31T15:00:00Z", None])
 
 
 if __name__ == "__main__":

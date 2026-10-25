@@ -61,22 +61,25 @@ def record_text(roster):
     return f"{wins}–{roster.get('losses') or 0}" + (f"–{ties}" if ties else "")
 
 
-def live_side(starters, week_stats, scoring, states):
+def live_side(starters, week_stats, scoring, states, kickoffs=None):
     """Points so far for a side's set lineup during the week being played.
 
-    `starters` is [(slot, player or None)]; `states` maps club -> "done" | "playing" | "to_play".
-    A starter whose match hasn't started counts 0 and is "to_play".
-    Returns ([{"slot", "pl", "points", "state"}], total, number still to play)."""
+    `starters` is [(slot, player or None)]; `states` maps club -> "done" | "playing" | "to_play" for the
+    clubs with a match this week, and `kickoffs` maps club -> its next kickoff (ISO). A starter whose
+    match hasn't started counts 0 and is "to_play" with that kickoff; one whose club has no match this
+    week is "no_match" and isn't counted as still to play.
+    Returns ([{"slot", "pl", "points", "state", "kickoff"}], total, number still to play)."""
     rows, total, to_play = [], 0.0, 0
     for slot, pl in starters:
         if pl is None:
-            rows.append({"slot": slot, "pl": None, "points": 0.0, "state": None})
+            rows.append({"slot": slot, "pl": None, "points": 0.0, "state": None, "kickoff": None})
             continue
-        state = states.get(pl.club, "to_play")
+        state = states.get(pl.club, "no_match")
         stats = week_stats.get(pl.sleeper_id)
         points = (sum(float(stats.get(k, 0) or 0) * float(v) for k, v in scoring.items())
                   if stats and state in ("done", "playing") else 0.0)
-        rows.append({"slot": slot, "pl": pl, "points": points, "state": state})
+        kickoff = (kickoffs or {}).get(pl.club) if state == "to_play" else None
+        rows.append({"slot": slot, "pl": pl, "points": points, "state": state, "kickoff": kickoff})
         total += points
         to_play += state == "to_play"
     return rows, total, to_play
