@@ -255,6 +255,31 @@ class PairedComparisonTests(unittest.TestCase):
         self.assertAlmostEqual(week["mae_v1_paired"], 1.0)   # only players with v2
         self.assertAlmostEqual(week["mae_v2"], 0.0)
 
+    def test_score_weeks_v1m_paired(self):
+        conn = connect(":memory:")
+        a, b, c = pl("a", 4), pl("b", 0), pl("c", 2)
+        a.proj_v1m, b.proj_v1m = 6.0, 1.0           # c: no minutes estimate
+        log_projections(conn, "2026", 9, [a, b, c], "2026-10-23T10:00:00Z")
+        for pid, g in (("a", 1), ("b", 0), ("c", 0)):
+            conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, ?, ?, 'x')",
+                         (pid, json.dumps({"min": 90, "pos_m_g": g})))
+        week = score_weeks(conn, "2026", SC, 9)[0]
+        self.assertEqual(week["n_v1m"], 2)
+        self.assertAlmostEqual(week["mae_v1m"], (1.0 + 1.0) / 2)
+        self.assertAlmostEqual(week["mae_v1_v1m"], (1.0 + 0.0) / 2)   # v1 on the same two players
+        self.assertEqual(week["n_v2m"], 0)
+
+    def test_brier_start_counts_dnp(self):
+        conn = connect(":memory:")
+        a = pl("a", 4)
+        a.p_start, a.p_app = 0.9, 0.95
+        log_projections(conn, "2026", 9, [a], "2026-10-23T10:00:00Z")
+        conn.execute("INSERT INTO sleeper_stats VALUES ('2026', 9, 'other', '{}', 'x')")   # week fetched; a absent
+        week = score_weeks(conn, "2026", SC, 9)[0]
+        self.assertAlmostEqual(week["brier_start"], 0.81)
+        self.assertAlmostEqual(week["brier_app"], 0.9025)
+        self.assertEqual(week["n_minutes"], 1)
+
     def test_summary_uses_paired(self):
         weeks = [{"gw": 8, "mae_v1": 9.0, "mae_v1_paired": 1.0, "mae_v2": 2.0, "n_v2": 5},
                  {"gw": 9, "mae_v1": 9.0, "mae_v1_paired": 1.0, "mae_v2": 2.0, "n_v2": 5}]

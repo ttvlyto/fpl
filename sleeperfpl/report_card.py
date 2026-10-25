@@ -63,12 +63,13 @@ def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
     if last_finished is None:
         return []
     latest, goal = {}, {}
-    for made_at, gw, sid, kickoff, v1, v2, pg, pos, ep in conn.execute(
-            "SELECT made_at, gw, sleeper_id, kickoff, v1, v2, p_goal_market, position, ep_next FROM projection_log "
+    for made_at, gw, sid, kickoff, v1, v2, pg, pos, ep, v1m, v2m, ps, pa in conn.execute(
+            "SELECT made_at, gw, sleeper_id, kickoff, v1, v2, p_goal_market, position, ep_next, v1m, v2m, p_start, "
+            "p_app FROM projection_log "
             "WHERE season = ? AND gw <= ? AND (kickoff IS NULL OR made_at <= kickoff) ORDER BY made_at",
             (season, last_finished)):
         if v1 is not None:
-            latest[(gw, sid)] = (v1, v2, pos, ep)
+            latest[(gw, sid)] = (v1, v2, pos, ep, v1m, v2m, ps, pa)
         if pg is not None:
             goal[(gw, sid)] = pg
     actual = {(week, pid): json.loads(raw) for week, pid, raw in conn.execute(
@@ -82,9 +83,10 @@ def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
             continue  # stats not fetched yet: scoring now would count everyone as 0
         stats = actual.get(key)
         pts = sleeper_points(stats, scoring) if stats else 0.0
-        w = weeks.setdefault(gw, {"v1": [], "v2": [], "v1p": [], "ep": [], "v1e": [], "b": []})
+        w = weeks.setdefault(gw, {"v1": [], "v2": [], "v1p": [], "ep": [], "v1e": [], "b": [], "v1m": [],
+                                  "v1_v1m": [], "v2m": [], "v2_v2m": [], "b_start": [], "b_app": []})
         if key in latest:
-            v1, v2, pos, ep = latest[key]
+            v1, v2, pos, ep, v1m, v2m, ps, pa = latest[key]
             cat = category(stats, pts, low, haul)
             w["v1"].append(Scored(pos, v1, pts, cat))
             if v2 is not None:   # compare v1 and v2 on the same players
@@ -93,6 +95,16 @@ def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
             if ep is not None:   # ep_next is in FPL points: only its ordering is comparable
                 w["ep"].append(Scored(pos, ep, pts, cat))
                 w["v1e"].append(Scored(pos, v1, pts, cat))
+            if v1m is not None:  # minutes-aware versions, each beside its original on the same players
+                w["v1m"].append(Scored(pos, v1m, pts, cat))
+                w["v1_v1m"].append(Scored(pos, v1, pts, cat))
+            if v2m is not None and v2 is not None:
+                w["v2m"].append(Scored(pos, v2m, pts, cat))
+                w["v2_v2m"].append(Scored(pos, v2, pts, cat))
+            if ps is not None:   # no stats row counts as didn't start, didn't play
+                st = stats or {}
+                w["b_start"].append(brier(ps, (st.get("gs") or 0) >= 1))
+                w["b_app"].append(brier(pa, (st.get("min") or 0) > 0))
         if key in goal and stats and (stats.get("min") or 0) > 0:
             w["b"].append(brier(goal[key], (stats.get("g") or 0) >= 1))
 
@@ -108,7 +120,14 @@ def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
                     "rank_v2": rank_by_position(w["v2"]), "rank_v1_paired": rank_by_position(w["v1p"]),
                     "n_ep": len(w["ep"]), "rank_ep": rank_by_position(w["ep"]),
                     "rank_v1_ep": rank_by_position(w["v1e"]),
-                    "brier_goal": mean(w["b"]), "n_goal": len(w["b"])})
+                    "brier_goal": mean(w["b"]), "n_goal": len(w["b"]),
+                    "n_v1m": len(w["v1m"]), "mae_v1m": error_summary(w["v1m"])["mae"],
+                    "rank_v1m": rank_by_position(w["v1m"]), "mae_v1_v1m": error_summary(w["v1_v1m"])["mae"],
+                    "rank_v1_v1m": rank_by_position(w["v1_v1m"]),
+                    "n_v2m": len(w["v2m"]), "mae_v2m": error_summary(w["v2m"])["mae"],
+                    "rank_v2m": rank_by_position(w["v2m"]), "mae_v2_v2m": error_summary(w["v2_v2m"])["mae"],
+                    "rank_v2_v2m": rank_by_position(w["v2_v2m"]),
+                    "brier_start": mean(w["b_start"]), "brier_app": mean(w["b_app"]), "n_minutes": len(w["b_start"])})
     return out
 
 

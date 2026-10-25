@@ -187,6 +187,25 @@ class ReportTests(unittest.TestCase):
         r["report_card"]["matches"] = [{"gw": 8, "n": 10, "log_loss": 0.98, "rps": 0.2, "brier_cs": 0.21}]
         self.assertIn("Log loss", render_html(r))
 
+    def test_report_card_html_minutes_and_labels(self):
+        seed(self.conn)
+        r = build_report(self.conn, self.cfg, NOW)
+        week = {"gw": 8, "n": 40, "mae_v1": 3.1, "mae_v1_played": 2.5, "mae_v2": None, "rank_v1": 0.42,
+                "brier_goal": None, "n_goal": 0}
+        r["report_card"] = {"weeks": [week], "summary": "not enough weeks yet", "matches": [], "decisions": [],
+                            "labels": []}
+        page = render_html(r)
+        self.assertNotIn("With minutes", page)
+        self.assertNotIn("how often flagged players played", page)
+        week.update(n_v1m=38, mae_v1m=2.9, mae_v1_v1m=3.0, rank_v1m=0.45, rank_v1_v1m=0.40, brier_start=0.141,
+                    n_minutes=38)
+        r["report_card"]["labels"] = [{"kind": "sleeper", "cell": "a100+out", "n": 12, "start_rate": 0.5,
+                                       "app_rate": 0.75, "sixty_rate": 0.5, "app_lo": 0.52, "app_hi": 0.9}]
+        page = render_html(r)
+        for text in ("With minutes", "2.9 / 3.0 · 0.45 / 0.40", "0.141", "how often flagged players played",
+                     "Sleeper says Out, FPL says available", "52–90%"):
+            self.assertIn(text, page)
+
     def test_approximate_banner(self):
         seed(self.conn)
         page = render_html(build_report(self.conn, self.cfg, NOW))

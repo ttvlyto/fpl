@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from .availability import (LabelTable, apply_labels, chance_for, fpl_bucket, fpl_stale, hard_out_weeks, is_hard_out,
+from .availability import (LabelTable, apply_labels, audit_rows, chance_for, fpl_bucket, fpl_stale, hard_out_weeks, is_hard_out,
                            load_counts, rebuild_label_counts, slp_bucket)
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
@@ -264,7 +264,8 @@ def build_report(conn, cfg, now):
         "report_card": {"weeks": [_rounded(w) for w in card[-8:]],
                         "decisions": [_rounded(d) for d in decisions[-8:]],
                         "matches": [_rounded(m) for m in match_card[-8:]],
-                        "summary": summary(card, decisions)},
+                        "summary": summary(card, decisions),
+                        "labels": [_rounded(x) for x in audit_rows(conn, sleeper_season)] if use_sleeper else []},
         "matches": matches,
         "markets_unmatched": markets_unmatched,
         "projection_note": note,
@@ -586,9 +587,17 @@ def _report_card(r):
     rc = r.get("report_card") or {}
     decisions = {d["gw"]: d for d in rc.get("decisions", [])}
     show_xi = bool(decisions)
+    show_min = any(w.get("n_v1m") for w in rc.get("weeks", []))
     rows = []
     for w in rc.get("weeks", []):
         d = decisions.get(w["gw"])
+        minutes = ""
+        if show_min:
+            minutes = ("<td class=\"num\">–</td><td class=\"num\">–</td>" if not w.get("n_v1m") else
+                       f'<td class="num">{_num(w["mae_v1m"])} / {_num(w["mae_v1_v1m"])} · {_rank(w["rank_v1m"])} / '
+                       f'{_rank(w["rank_v1_v1m"])} <small>({w["n_v1m"]})</small></td>'
+                       f'<td class="num">{"–" if w.get("brier_start") is None else format(w["brier_start"], ".3f")}'
+                       f'</td>')
         xi = "".join(f'<td class="num">{_num(d[k]) if d else "–"}</td>' for k in ("set_pts", "tool_pts", "best_pts"))
         # v2 next to v1 on the same players only, never v1 over everyone
         v2 = ("–" if w["mae_v2"] is None else
@@ -598,10 +607,12 @@ def _report_card(r):
             f'<td class="num">{_num(w.get("mae_v1_played"))}</td><td class="num">{v2}</td>'
             f'<td class="num">{_rank(w.get("rank_v1"))}</td>'
             f'<td class="num">{"–" if w["brier_goal"] is None else format(w["brier_goal"], ".3f")} '
-            f'<small>({w["n_goal"]})</small></td>{xi if show_xi else ""}</tr>')
+            f'<small>({w["n_goal"]})</small></td>{minutes}{xi if show_xi else ""}</tr>')
     head = ('<tr><th>Week</th><th class="num">Players</th><th class="num">Avg miss (all)</th>'
             '<th class="num">Avg miss (played)</th><th class="num">Avg miss v2 / v1 (same players)</th><th class="num">Order (v1)</th>'
             '<th class="num">Goal-odds score</th>'
+            + ('<th class="num">With minutes (v1m / v1): miss · order</th><th class="num">Start-odds score</th>'
+               if show_min else "")
             + ('<th class="num">Your XI</th><th class="num">Tool XI</th><th class="num">Best XI</th>' if show_xi else "")
             + '</tr>')
     table = f'<div class="scroll"><table><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table></div>' if rows else ""
@@ -614,6 +625,18 @@ def _report_card(r):
         mtable = ('<h2 style="margin-top:12px">Match odds</h2><div class="scroll"><table><thead><tr><th>Week</th>'
                   '<th class="num">Matches</th><th class="num">Log loss</th><th class="num">RPS</th>'
                   f'<th class="num">Clean-sheet score</th></tr></thead><tbody>{mrows}</tbody></table></div>')
+    labels = rc.get("labels") or []
+    ltable = ""
+    if labels:
+        lrows = "".join(
+            f'<tr><td>{_e(_label_name(x))}</td><td class="num">{x["n"]}</td><td class="num">{_pct(x["start_rate"])}</td>'
+            f'<td class="num">{_pct(x["app_rate"])}</td><td class="num">{round(100 * x["app_lo"])}–'
+            f'{round(100 * x["app_hi"])}%</td><td class="num">{_pct(x["sixty_rate"])}</td></tr>' for x in labels)
+        ltable = ('<h2 style="margin-top:12px">Labels: how often flagged players played</h2><div class="scroll"><table>'
+                  '<thead><tr><th>Label</th><th class="num">Players</th><th class="num">Started</th>'
+                  '<th class="num">Played</th><th class="num">Played range</th><th class="num">60+</th></tr></thead>'
+                  f'<tbody>{lrows}</tbody></table></div>'
+                  '<div class="muted">Ranges are 90% intervals. Few players means a wide range.</div>')
     notes = ['Avg miss = average points the projection was off by (lower is better); "all" counts players who '
              "didn't play as 0 points.",
              "Order = how well the projection ranked players within each position, from −1 to 1 (higher is better).",
@@ -623,8 +646,27 @@ def _report_card(r):
                      "and the best lineup possible from your roster.")
     if matches:
         notes.append("Log loss, RPS and clean-sheet score grade the match odds against results (lower is better).")
-    return (f'<div class="card"><h2>Report card</h2>{table}{mtable}<div class="muted" style="margin-top:6px">'
+    if show_min:
+        notes.append("With minutes = the projection using expected minutes, beside today's on the same players. "
+                     "Start-odds score = how well the chance of starting predicted who started (Brier; lower is "
+                     "better).")
+    return (f'<div class="card"><h2>Report card</h2>{table}{mtable}{ltable}<div class="muted" style="margin-top:6px">'
             f'{_e(rc.get("summary", "not enough weeks yet"))}. {_e(" ".join(notes))}</div></div>')
+
+
+_LABEL_NAMES = {"a100+out": "Sleeper says Out, FPL says available", "a100+gtd": "Sleeper says GTD, FPL says available",
+                "a100+sus": "Sleeper says suspended, FPL says available", "flagged+out": "Sleeper says Out, FPL flagged"}
+
+
+def _label_name(x):
+    if x["kind"] == "sleeper":
+        return _LABEL_NAMES.get(x["cell"], f"Sleeper {x['cell']}")
+    cell = x["cell"]
+    if cell == "a100":
+        return "FPL: available"
+    if cell in ("s", "u", "n"):
+        return {"s": "FPL: suspended", "u": "FPL: unavailable", "n": "FPL: not in squad"}[cell]
+    return f"FPL: {'injured' if cell[0] == 'i' else 'doubtful'} {cell[1:]}%"
 
 
 def _live_card(r):
