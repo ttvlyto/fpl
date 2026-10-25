@@ -6,9 +6,13 @@ independent. Runs once per game week; `build` only reads what it saved.
 """
 
 import json
+import os
+from collections import namedtuple
+from datetime import timedelta
 
 from .availability import chance_for
 from .db import latest
+from .gameweek import target_gameweek
 from .headtohead import all_results, form, head_to_head, season_results
 from .lineup import _eligible, best_xi
 from .report import BuildError, build_report
@@ -177,3 +181,104 @@ def validate_answer(answer, packet, context, eligibility):
     if len(left) > can_leave:
         problems.append(f"slots left empty: {', '.join(left)}; your roster after swaps can fill all but {can_leave}")
     return problems
+
+
+SYSTEM_PROMPT = """You are advising the manager of a Sleeper fantasy Premier League team for one game week.
+The user message is a JSON packet with the league's starting slots and scoring, the manager's roster,
+a list of free agents, and this game week's fixtures with betting odds, head-to-head records and form.
+
+Pick the starting XI and up to max_swaps drop/add swaps that will score the most league points this
+game week. Apply your swaps first: pick the XI from the roster after them, so a player you add may
+start and a player you drop may not. Players on IR can't start or be dropped; undroppable players
+can't be dropped. Adds are free agent pickups or waiver claims, as the packet's adds_are says.
+
+Judge on evidence: minutes, recent league points, form, fixtures, odds and injury news. Do not favour
+players for their club's reputation or their name; a squad player at a big club who isn't getting
+minutes is worth less than a regular starter at a small one. Cite only numbers that appear in the
+packet, and never invent a statistic. Keep every reason to one sentence. Write matchup notes only
+for fixtures involving the roster or your adds. Return no swaps if none clearly helps."""
+
+Reply = namedtuple("Reply", "text stop_reason input_tokens output_tokens")
+
+
+def _default_call(request):
+    """Send `request` to the Anthropic API (streamed) and return a Reply."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise BuildError("ANTHROPIC_API_KEY isn't set")
+    try:
+        import anthropic
+    except ImportError:
+        raise BuildError("the anthropic package isn't installed: pip install -r requirements.txt")
+    try:
+        with anthropic.Anthropic().beta.messages.stream(**request) as stream:
+            m = stream.get_final_message()
+    except anthropic.APIError as e:
+        raise BuildError(f"Anthropic API: {e}")
+    text = "".join(b.text for b in m.content if b.type == "text")
+    return Reply(text, m.stop_reason, m.usage.input_tokens, m.usage.output_tokens)
+
+
+def make_request(packet, cfg, problems=None, previous=None):
+    so = cfg.second_opinion
+    messages = [{"role": "user", "content": json.dumps(packet)}]
+    if problems:
+        messages += [{"role": "assistant", "content": previous},
+                     {"role": "user", "content": "That answer breaks the league's rules:\n- " + "\n- ".join(problems)
+                      + "\nSend a corrected full answer."}]
+    return {"model": so["model"], "max_tokens": 64000,
+            "betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default",
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": so["effort"], "format": {"type": "json_schema", "schema": ANSWER_SCHEMA}},
+            "system": SYSTEM_PROMPT, "messages": messages}
+
+
+def is_due(conn, season, gw, first_kickoff, now, lead_hours):
+    """A game week to plan, its first kickoff within lead_hours, and no opinion saved for it yet."""
+    if not gw or first_kickoff is None or first_kickoff - now > timedelta(hours=lead_hours):
+        return False
+    return conn.execute("SELECT 1 FROM second_opinion_log WHERE season = ? AND gw = ?",
+                        (season, gw)).fetchone() is None
+
+
+def _ask(call, request):
+    reply = call(request)
+    if reply.stop_reason != "end_turn":
+        raise BuildError(f"Claude stopped early ({reply.stop_reason}); nothing saved")
+    try:
+        return reply, json.loads(reply.text)
+    except json.JSONDecodeError:
+        raise BuildError("Claude's answer wasn't valid JSON; nothing saved")
+
+
+def run_second_opinion(conn, cfg, now, *, force=False, call=None, refresh=None):
+    """Ask Claude for this game week's opinion if one is due (or `force`), and save it. Returns a status line."""
+    so = cfg.second_opinion
+    if not so["enabled"]:
+        return "second opinion: disabled in config.json"
+    league = latest(conn, "sleeper_league")
+    season = str(json.loads(league[0]["data_json"]).get("season") or "") if league else ""
+    gw = target_gameweek([dict(r) for r in latest(conn, "fpl_events")],
+                         [dict(r) for r in latest(conn, "fpl_fixtures")], now)
+    if not force and not is_due(conn, season, gw.gw, gw.first_kickoff, now, so["lead_hours"]):
+        return f"second opinion: not due (GW{gw.gw or '-'})"
+    if refresh:
+        refresh()
+    packet, context = build_packet(conn, cfg, now)
+    call = call or _default_call
+    reply, answer = _ask(call, make_request(packet, cfg))
+    problems = validate_answer(answer, packet, context, cfg.slot_eligibility)
+    if problems:
+        reply2, answer = _ask(call, make_request(packet, cfg, problems, reply.text))
+        reply = Reply(reply2.text, reply2.stop_reason, reply.input_tokens + reply2.input_tokens,
+                      reply.output_tokens + reply2.output_tokens)
+        problems = validate_answer(answer, packet, context, cfg.slot_eligibility)
+        if problems:
+            raise BuildError("Claude's answer broke the league's rules twice; nothing saved:\n  "
+                             + "\n  ".join(problems))
+    with conn:
+        conn.execute("INSERT INTO second_opinion_log VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     (now.strftime("%Y-%m-%dT%H:%M:%SZ"), context["season"], packet["gameweek"],
+                      packet["first_kickoff"], so["model"], json.dumps(answer["xi"]), json.dumps(answer["swaps"]),
+                      json.dumps(answer["matchup_notes"]), answer["summary"], reply.input_tokens,
+                      reply.output_tokens))
+    return f"second opinion: GW{packet['gameweek']} saved ({reply.input_tokens}/{reply.output_tokens} tokens)"

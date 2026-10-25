@@ -21,6 +21,7 @@ from .http import FetchError
 from .matching import load_overrides
 from .report import BuildError, build_report, write_outputs
 from .sleeper_stats import fetch_sleeper_stats
+from .second_opinion import run_second_opinion
 from .scoring_map import (coverage, ensure_scoring_map, league_drift, load_scoring_map, probe_sleeper_stats,
                           rule_lines)
 
@@ -139,6 +140,20 @@ def cmd_matchday(cfg, conn, args):
     cmd_build(cfg, conn, args)
 
 
+def cmd_second_opinion(cfg, conn, args):
+    def refresh():
+        # Fresh rosters and injury news for Claude; a failed fetch only warns (the last snapshot stays).
+        for label, fn in (("rosters", lambda: fetch_rosters(conn, cfg.league_id)),
+                          ("trending", lambda: fetch_trending(conn, _league(conn)["sport"])),
+                          ("fpl status", lambda: fetch_bootstrap(conn))):
+            try:
+                print(f"{label}: {fn()}")
+            except FetchError as e:
+                sys.stderr.write(f"warning: {label} failed: {e}\n")
+
+    print(run_second_opinion(conn, cfg, datetime.now(timezone.utc), force=args.force, refresh=refresh))
+
+
 def cmd_build(cfg, conn, args):
     report = build_report(conn, cfg, datetime.now(timezone.utc))
     write_outputs(report, cfg.output_dir)
@@ -210,6 +225,7 @@ COMMANDS = {
     "coverage": (cmd_coverage, "how much of the league's scoring FPL covers"),
     "fetch-markets": (cmd_fetch_markets, "Kalshi + Polymarket match odds"),
     "matchday": (cmd_matchday, "before kickoffs / after matches: odds, player markets, live stats, rebuild"),
+    "second-opinion": (cmd_second_opinion, "ask Claude for its own XI and swaps (once per game week)"),
     "build": (cmd_build, "write report.json and index.html"),
     "backtest": (cmd_backtest, "replay past weeks to compare projection methods"),
     "fit-minutes": (cmd_fit_minutes, "refit the start/minutes model from stored Sleeper weeks"),
@@ -235,6 +251,8 @@ def main(argv=None):
         if name == "fetch-history":
             p.add_argument("--force", action="store_true", help="refetch even if no new game week finished")
             p.add_argument("--season", help="fetch a past season's Sleeper stats (e.g. 2025), for backtest")
+        if name == "second-opinion":
+            p.add_argument("--force", action="store_true", help="ask again even if not due or already saved")
         if name == "fetch-results":
             p.add_argument("--from", dest="from_season", type=int, default=RESULTS_FROM,
                            help=f"first season's start year (default {RESULTS_FROM})")

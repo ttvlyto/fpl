@@ -38,6 +38,17 @@ class FetchResultsCommandTests(unittest.TestCase):
             self.assertIn("results: 3 season(s) fetched", out.getvalue())
 
 
+class SecondOpinionCommandTests(unittest.TestCase):
+    def test_disabled_prints_and_exits_0(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = Path(d) / "config.json"
+            cfg.write_text(json.dumps({"league_id": "L1", "owner": "me", "db_path": "t.db"}))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(main(["--config", str(cfg), "second-opinion"]), 0)
+            self.assertIn("disabled", out.getvalue())
+
+
 class CrontabTests(unittest.TestCase):
     def test_fetch_status_never_shares_a_minute_with_matchday(self):
         lines = [l for l in (Path(__file__).parent.parent / "deploy" / "crontab.example").read_text().splitlines()

@@ -74,6 +74,11 @@ LOG_TABLES = {
     # Every build's suggested XI (sleeper ids) and swaps ([drop_id, add_id]).
     "recommendation_log": ("made_at TEXT, season TEXT, gw INTEGER, first_kickoff TEXT, roster_id INTEGER, "
                            "xi_json TEXT, swaps_json TEXT"),
+    # Claude's second opinion, once per game week: [{player_id, slot, reason}], [{drop_id, add_id, reason}],
+    # [{fixture, note}].
+    "second_opinion_log": ("made_at TEXT, season TEXT, gw INTEGER, first_kickoff TEXT, model TEXT, "
+                           "xi_json TEXT, swaps_json TEXT, notes_json TEXT, summary TEXT, "
+                           "input_tokens INTEGER, output_tokens INTEGER"),
 }
 
 TABLES = set(SNAPSHOT_TABLES) | set(LOG_TABLES) | {"fpl_history", "sleeper_stats", "meta", "minutes_model",

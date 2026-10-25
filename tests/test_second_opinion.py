@@ -179,3 +179,114 @@ class ValidateTests(unittest.TestCase):
         self.assertEqual(set(so.ANSWER_SCHEMA["required"]), {"summary", "xi", "swaps", "matchup_notes"})
         self.assertFalse(so.ANSWER_SCHEMA["additionalProperties"])
         self.assertFalse(so.ANSWER_SCHEMA["properties"]["xi"]["items"]["additionalProperties"])
+
+
+GOOD = json.dumps(answer([("GK", "s1"), ("MID", "s2"), ("MID", "s3")]))
+BAD = json.dumps(answer([("GK", "s1"), ("MID", "s2"), ("MID", "s9")]))
+
+
+class FakeCall:
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.requests = []
+
+    def __call__(self, request):
+        self.requests.append(request)
+        text, stop = self.replies.pop(0) if self.replies else (GOOD, "end_turn")
+        return so.Reply(text, stop, 1000, 200)
+
+
+class RunTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.cfg = make_cfg(Path(self._tmp.name))
+        self.cfg.stats_source = "sleeper"
+        self.cfg.second_opinion = {"enabled": True, "model": "claude-opus-5-5", "effort": "high", "lead_hours": 48}
+        self.conn = connect(":memory:")
+        seed_sleeper(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+        self._tmp.cleanup()
+
+    def rows(self):
+        return self.conn.execute("SELECT COUNT(*) FROM second_opinion_log").fetchone()[0]
+
+    def test_not_due_makes_no_call(self):
+        self.cfg.second_opinion["lead_hours"] = 24   # first kickoff is ~39.5 hours after NOW
+        call, refresh = FakeCall(), mock.Mock()
+        self.assertIn("not due", so.run_second_opinion(self.conn, self.cfg, NOW, call=call, refresh=refresh))
+        self.assertEqual((len(call.requests), self.rows()), (0, 0))
+        refresh.assert_not_called()
+
+    def test_due_saves_one_row_and_second_run_skips(self):
+        call, refresh = FakeCall(), mock.Mock()
+        status = so.run_second_opinion(self.conn, self.cfg, NOW, call=call, refresh=refresh)
+        self.assertEqual(status, "second opinion: GW9 saved (1000/200 tokens)")
+        refresh.assert_called_once()
+        row = self.conn.execute("SELECT season, gw, first_kickoff, model, xi_json FROM second_opinion_log").fetchone()
+        self.assertEqual(tuple(row[:4]), ("2026", 9, "2026-10-24T11:30:00Z", "claude-opus-5-5"))
+        self.assertEqual(json.loads(row[4])[0]["player_id"], "s1")
+        self.assertIn("not due", so.run_second_opinion(self.conn, self.cfg, NOW, call=call))
+        self.assertEqual(len(call.requests), 1)
+        so.run_second_opinion(self.conn, self.cfg, NOW, call=call, force=True)
+        self.assertEqual(self.rows(), 2)
+
+    def test_request_shape(self):
+        call = FakeCall()
+        so.run_second_opinion(self.conn, self.cfg, NOW, call=call)
+        r = call.requests[0]
+        self.assertEqual(r["model"], "claude-opus-5-5")
+        self.assertEqual(r["fallbacks"], "default")
+        self.assertIn("server-side-fallback-2026-07-01", r["betas"])
+        self.assertEqual(r["thinking"], {"type": "adaptive"})
+        self.assertEqual(r["output_config"]["effort"], "high")
+        self.assertIs(r["output_config"]["format"]["schema"], so.ANSWER_SCHEMA)
+        self.assertNotIn("temperature", r)
+        self.assertEqual(json.loads(r["messages"][0]["content"])["gameweek"], 9)
+        self.assertIn("reputation", r["system"])
+
+    def test_invalid_then_valid_retries_once(self):
+        call = FakeCall((BAD, "end_turn"), (GOOD, "end_turn"))
+        so.run_second_opinion(self.conn, self.cfg, NOW, call=call)
+        self.assertEqual(len(call.requests), 2)
+        msgs = call.requests[1]["messages"]
+        self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
+        self.assertEqual(msgs[1]["content"], BAD)
+        self.assertIn("s9", msgs[2]["content"])
+        self.assertEqual(self.rows(), 1)
+
+    def test_invalid_twice_raises_and_saves_nothing(self):
+        call = FakeCall((BAD, "end_turn"), (BAD, "end_turn"))
+        with self.assertRaisesRegex(BuildError, "s9"):
+            so.run_second_opinion(self.conn, self.cfg, NOW, call=call)
+        self.assertEqual(self.rows(), 0)
+
+    def test_refusal_or_bad_json_raises(self):
+        for reply in ((GOOD, "refusal"), (GOOD, "max_tokens"), ("not json", "end_turn")):
+            with self.assertRaises(BuildError):
+                so.run_second_opinion(self.conn, self.cfg, NOW, call=FakeCall(reply))
+        self.assertEqual(self.rows(), 0)
+
+    def test_disabled_does_nothing(self):
+        self.cfg.second_opinion["enabled"] = False
+        call = FakeCall()
+        self.assertIn("disabled", so.run_second_opinion(self.conn, self.cfg, NOW, call=call, force=True))
+        self.assertEqual(call.requests, [])
+
+    def test_missing_package_message(self):
+        real = __import__
+
+        def fake_import(name, *a, **k):
+            if name == "anthropic":
+                raise ImportError("no anthropic")
+            return real(name, *a, **k)
+
+        with mock.patch("builtins.__import__", fake_import), mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": "k"}):
+            with self.assertRaisesRegex(BuildError, "requirements.txt"):
+                so._default_call({})
+
+    def test_missing_key_message(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(BuildError, "ANTHROPIC_API_KEY"):
+                so._default_call({})
