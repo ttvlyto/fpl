@@ -82,5 +82,16 @@
     "model": "claude-opus-5-5",
     "effort": "high",
     "lead_hours": 48
+  },
+  "schedule": {
+    "start_gw": 9,
+    "end_gw": 31,
+    "opponents": [
+      "Machine Gun Skelly",
+      "2nd again ole ole ole",
+      "firmala firmala",
+      "briantrovato",
+      "HORMIGOOOOOL"
+    ]
   }
 }

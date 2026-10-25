@@ -35,6 +35,21 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "second_opinion"):
                 load_config(str(path))
 
+    def test_schedule_defaults_to_none(self):
+        self.assertIsNone(load_config(str(self.write({"league_id": "1", "owner": "me"}))).schedule)
+
+    def test_schedule_end_defaults_to_38(self):
+        cfg = load_config(str(self.write({"league_id": "1", "owner": "me",
+                                          "schedule": {"start_gw": 9, "opponents": ["A", "B"]}})))
+        self.assertEqual(cfg.schedule, {"start_gw": 9, "end_gw": 38, "opponents": ["A", "B"]})
+
+    def test_bad_schedule_rejected(self):
+        for bad in ({"start_gw": 9, "opponents": []}, {"start_gw": 9, "end_gw": 8, "opponents": ["A"]},
+                    {"start_gw": "nine", "opponents": ["A"]}, {"start_gw": 9, "opponents": "A"}):
+            path = self.write({"league_id": "1", "owner": "me", "schedule": bad})
+            with self.assertRaisesRegex(ConfigError, "schedule"):
+                load_config(str(path))
+
     def test_defaults_and_relative_paths(self):
         path = self.write({"league_id": "123", "owner": "me"})
         cfg = load_config(str(path))

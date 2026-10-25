@@ -44,6 +44,8 @@ DEFAULTS = {
     "minutes_shrink_k": 3,         # pseudo-90s pulling v1m/v2m per-90 rates toward the position average
     # Claude's second opinion: once per game week, lead_hours before its first kickoff.
     "second_opinion": {"enabled": False, "model": "claude-opus-5-5", "effort": "high", "lead_hours": 48},
+    # Head-to-head opponents by game week, repeating from start_gw to end_gw (Sleeper's API has no soccer matchups).
+    "schedule": None,
 }
 MINUTES_MODES = ("shadow", "on")
 STATS_SOURCES = ("sleeper", "fpl")
@@ -87,6 +89,7 @@ class Config:
     sleeper_label_weight: float = 1.0
     minutes_shrink_k: float = 3
     second_opinion: dict = field(default_factory=lambda: dict(DEFAULTS["second_opinion"]))
+    schedule: dict | None = None
 
 
 def _second_opinion(raw, cfg_path):
@@ -102,6 +105,20 @@ def _second_opinion(raw, cfg_path):
     if so["lead_hours"] <= 0:
         raise ConfigError(f"{cfg_path}: second_opinion lead_hours must be more than 0")
     return so
+
+
+def _schedule(raw, cfg_path):
+    if raw is None:
+        return None
+    bad = ConfigError(f'{cfg_path}: schedule must look like {{"start_gw": 9, "end_gw": 31, '
+                      f'"opponents": ["Team A", "Team B"]}} (end_gw is optional)')
+    if not isinstance(raw, dict):
+        raise bad
+    start, end, opponents = raw.get("start_gw"), raw.get("end_gw", 38), raw.get("opponents")
+    if (not all(isinstance(x, int) and not isinstance(x, bool) for x in (start, end)) or not 1 <= start <= end
+            or not isinstance(opponents, list) or not opponents or not all(isinstance(o, str) and o.strip() for o in opponents)):
+        raise bad
+    return {"start_gw": start, "end_gw": end, "opponents": list(opponents)}
 
 
 def load_config(path: str | None = None) -> Config:
@@ -159,6 +176,7 @@ def load_config(path: str | None = None) -> Config:
             sleeper_label_weight=float(merged["sleeper_label_weight"]),
             minutes_shrink_k=float(merged["minutes_shrink_k"]),
             second_opinion=_second_opinion(raw.get("second_opinion") or {}, cfg_path),
+            schedule=_schedule(raw.get("schedule"), cfg_path),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:
