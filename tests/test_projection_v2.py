@@ -1,7 +1,9 @@
 import math
 import unittest
 
-from sleeperfpl.projection_v2 import V2Inputs, project_v2, split_points, v2_inputs
+from sleeperfpl.minutes import FixtureMinutes
+from sleeperfpl.projection_v2 import (V2Inputs, V2mInputs, project_v2, project_v2m, split_points, v2_inputs,
+                                      v2m_inputs)
 
 SC = {"pos_d_cs": 6, "pos_d_ga": -2, "pos_d_g": 10, "pos_d_tkw": 1, "pos_f_g": 9, "pos_f_sot": 2}
 
@@ -35,3 +37,21 @@ class ProjectionV2Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class V2mTests(unittest.TestCase):
+    def test_v2m_inputs_per_90(self):
+        weeks = [{"min": 90, "pos_d_cs": 1, "pos_d_tkw": 2}, {"min": 45, "pos_d_g": 1, "pos_d_ga": 1}]
+        inp = v2m_inputs(weeks, SC, "pos_d_", 5)
+        self.assertAlmostEqual(inp.att90, 10 / 135 * 90)
+        self.assertAlmostEqual(inp.other90, 2 / 135 * 90)
+        self.assertEqual((inp.cs_points, inp.ga_points), (6, -2))
+        self.assertIsNone(v2m_inputs([], SC, "pos_d_", 5))
+
+    def test_project_v2m_defender(self):
+        full = FixtureMinutes([(90, 1.0)], 1.0, 1.0, 90.0)
+        m = V2mInputs(att90=1.0, other90=3.0, cs_points=6, ga_points=-2)
+        v2 = project_v2(V2Inputs(att_avg=1.0, other_avg=3.0, p60=1.0, cs_points=6, ga_points=-2, n=5), 1.35, 0.5, 1.35)
+        self.assertAlmostEqual(project_v2m(m, full, 1.35, 0.5, 1.35), v2)
+        half = FixtureMinutes([(45, 1.0)], 1.0, 0.0, 45.0)
+        self.assertAlmostEqual(project_v2m(m, half, 1.35, 0.5, 1.35), -2 * 0.5 * 0.5 + 0.5 + 1.5)

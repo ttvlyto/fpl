@@ -11,6 +11,10 @@ import re
 from dataclasses import dataclass
 
 DEF_CODES = {"cs", "ga"}
+G60_CODES = {"cs"}     # clean sheets need 60 minutes; every other code is earned per minute played
+# Every stat code in the league's scoring as of 2026-10-24; anything else gets a warning.
+KNOWN_CODES = {"acnc", "aer", "at", "bs", "clr", "cos", "cs", "cs90", "dis", "g", "ga", "hcs", "int", "kp", "min",
+               "og", "pkd", "pkm", "pks", "rc", "sm", "sot", "sv", "tkw", "yc", "yc2"}
 ATT_CODES = {"g", "at", "sot", "kp", "acnc", "cos", "pkd"}
 SLEEPER_PREFIX = {"GK": "pos_gk_", "DEF": "pos_d_", "MID": "pos_m_", "FWD": "pos_f_"}
 _KEY = re.compile(r"pos_(?:gk|d|m|f)_(\w+)")
@@ -26,6 +30,19 @@ class V2Inputs:
     n: int
 
 
+@dataclass
+class V2mInputs:
+    att90: float
+    other90: float
+    cs_points: float
+    ga_points: float
+
+
+def stat_code(key):
+    m = _KEY.fullmatch(key)
+    return m.group(1) if m else key
+
+
 def split_points(stats, scoring):
     """(defensive, attacking, other) league points for one week's stats."""
     buckets = [0.0, 0.0, 0.0]
@@ -33,8 +50,7 @@ def split_points(stats, scoring):
         value = stats.get(key)
         if not value:
             continue
-        m = _KEY.fullmatch(key)
-        code = m.group(1) if m else key
+        code = stat_code(key)
         idx = 0 if code in DEF_CODES else 1 if code in ATT_CODES else 2
         buckets[idx] += float(value) * float(points)
     return tuple(buckets)
@@ -57,3 +73,21 @@ def project_v2(inp, own_lam, opp_lam, team_baseline):
     defensive = inp.cs_points * math.exp(-opp_lam) * inp.p60 + inp.ga_points * opp_lam
     attacking = inp.att_avg * (own_lam / team_baseline)
     return defensive + attacking + inp.other_avg
+
+
+def v2m_inputs(weeks, scoring, prefix, window):
+    """Per-90 attacking and other points over a player's recent played weeks; None if none."""
+    recent = weeks[:window]
+    minutes = sum(float(w.get("min") or 0) for w in recent)
+    if not recent or minutes <= 0:
+        return None
+    parts = [split_points(w, scoring) for w in recent]
+    return V2mInputs(att90=sum(p[1] for p in parts) / minutes * 90, other90=sum(p[2] for p in parts) / minutes * 90,
+                     cs_points=scoring.get(prefix + "cs", 0), ga_points=scoring.get(prefix + "ga", 0))
+
+
+def project_v2m(inp, fm, own_lam, opp_lam, team_baseline):
+    """v2 for one fixture with minutes: clean sheets need 60+, everything else scales with minutes."""
+    share = fm.e_min / 90
+    defensive = inp.cs_points * math.exp(-opp_lam) * fm.p60 + inp.ga_points * opp_lam * share
+    return defensive + inp.att90 * share * (own_lam / team_baseline) + inp.other90 * share
