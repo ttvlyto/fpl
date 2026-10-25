@@ -332,6 +332,12 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
   both matches. Injury labels can't be backtested (no history of them before
   2026-10-24), and the label table starts from guesses until this league's
   outcomes build up.
+- **Known bug: v1m per-90 spikes on tiny minutes.** v1m's points per 90 are
+  a plain ratio, so a player with very few minutes gets an absurd rate (e.g.
+  3 minutes and a goal gives about 330 per 90, v1m 38.3). Shadow only today, but
+  don't set `minutes_model: "on"` until it's fixed: pull per-90 rates toward the
+  position average with about 3 pseudo-90s (`projection.minutes_rates`,
+  `projection_v2.v2m_inputs`). Likely part of why v1m lost early 2026 weeks.
 - **No rollback past this version.** The database gains columns that older
   code can't write to; going back to an older version needs a database backup
   from before the upgrade.
