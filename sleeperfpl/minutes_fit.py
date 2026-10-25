@@ -185,8 +185,20 @@ def measure_priors(rows, short):
             "short_prior": _by_pos(short, lambda r: 1.0 if r.started else 0.0, 0.3)}
 
 
+def all_rows(conn, pos_of, seasons, before=None):
+    """(training rows, short-history rows), built once so a walk-forward can filter them by week."""
+    return _rows(conn, pos_of, seasons, before)
+
+
+def earlier(row, before):
+    return _earlier(row.season, row.week, before)
+
+
 def fit_model(conn, pos_of, seasons, before=None, w0=None):
-    rows, short = _rows(conn, pos_of, seasons, before)
+    return fit_rows(*_rows(conn, pos_of, seasons, before), w0=w0)
+
+
+def fit_rows(rows, short, w0=None):
     if len(rows) < MIN_ROWS:
         return None
     w, mu, sd = fit_irls([r.x for r in rows], [r.started for r in rows], w0=w0)
@@ -232,6 +244,11 @@ def load_model(conn):
     row = conn.execute("SELECT model_json FROM minutes_model ORDER BY fitted_at DESC, version DESC LIMIT 1").fetchone()
     if row:
         return MinutesModel.from_dict(json.loads(row[0]))
+    return load_default()
+
+
+def load_default():
+    """The fit shipped beside this module (last season only), or None."""
     try:
         return MinutesModel.from_dict(json.loads(DEFAULT_PATH.read_text()))
     except (OSError, ValueError, TypeError):

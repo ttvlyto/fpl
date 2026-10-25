@@ -132,6 +132,97 @@ class BacktestTests(unittest.TestCase):
         self.assertIn("v2 and market numbers (no historical odds stored)", format_backtest(result))
 
 
+class MinutesBacktestTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(backtest, "MIN_FIT_ROWS", 50)   # the test pool is small
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.conn = connect(":memory:")
+        seed_league(self.conn)
+        for i in range(30):
+            self.conn.execute("INSERT INTO sleeper_players VALUES ('t', ?, ?, 'ARS', '[\"M\"]', 'Active', NULL, 1)",
+                              (f"q{i}", f"Q{i}"))
+
+    def pool(self, weeks=range(1, 13), season="2025"):
+        """q0-q14 always start and score; q15-q29 come off the bench in odd weeks."""
+        for w in weeks:
+            for t in range(1, 21):
+                self.conn.execute("INSERT OR REPLACE INTO sleeper_stats VALUES (?, ?, ?, ?, 'x')",
+                                  (season, w, f"TEAM_{t}", json.dumps({"gp": 1})))
+            for i in range(30):
+                if i < 15:
+                    st = {"min": 90, "gs": 1, "pos_m_g": (i + w) % 3 == 0}
+                else:
+                    st = {"min": 20 if w % 2 else 0, "pos_m_g": 0}
+                self.conn.execute("INSERT OR REPLACE INTO sleeper_stats VALUES (?, ?, ?, ?, 'x')",
+                                  (season, w, f"q{i}", json.dumps(st)))
+
+    def test_v1m_no_lookahead(self):
+        self.pool()
+        seen = []
+        real = backtest.fit_rows
+
+        def spy(rows, short, w0=None):
+            seen.append(max((r.season, r.week) for r in rows) if rows else None)
+            return real(rows, short, w0)
+        with mock.patch.object(backtest, "fit_rows", spy), mock.patch.object(backtest, "load_default", lambda: None):
+            result = run_backtest(self.conn, CFG, ["2025"])
+        weeks = [w["gw"] for w in result["seasons"]["2025"]["weeks"]]
+        self.assertEqual(len(seen), len(weeks))
+        for latest_row, gw in zip(seen, weeks):
+            if latest_row:
+                self.assertLess(latest_row, ("2025", gw))
+        self.assertTrue(any(w["model"] == "fit" for w in result["seasons"]["2025"]["weeks"]))
+        fitted = next(w for w in result["seasons"]["2025"]["weeks"] if w["model"] == "fit")
+        self.assertIsNotNone(fitted["methods"]["v1m"]["mae"])
+
+    def test_v1m_skipped_without_model(self):
+        self.pool()
+        with mock.patch.object(backtest, "fit_rows", lambda *a, **k: None), \
+             mock.patch.object(backtest, "load_default", lambda: None):
+            result = run_backtest(self.conn, CFG, ["2025"])
+        for w in result["seasons"]["2025"]["weeks"]:
+            self.assertIsNone(w["methods"]["v1m"]["mae"])
+            self.assertIsNotNone(w["methods"]["v1"]["mae"])
+            self.assertIsNone(w["model"])
+
+    def test_default_model_not_used_for_its_own_season(self):
+        from sleeperfpl.minutes_fit import fit_model
+        self.pool()
+        self.pool(season="2026")
+        self.conn.execute("INSERT INTO fpl_events VALUES ('t', 12, '2026-11-20T10:00:00Z', 1)")
+        default = fit_model(self.conn, {f"q{i}": "MID" for i in range(30)}, ["2025"])
+        with mock.patch.object(backtest, "fit_rows", lambda *a, **k: None), \
+             mock.patch.object(backtest, "load_default", lambda: default):
+            result = run_backtest(self.conn, CFG)
+        self.assertEqual({w["model"] for w in result["seasons"]["2025"]["weeks"]}, {None})
+        self.assertEqual({w["model"] for w in result["seasons"]["2026"]["weeks"]}, {"default"})
+
+    def test_minutes_section_baselines(self):
+        self.pool()
+        with mock.patch.object(backtest, "load_default", lambda: None):
+            result = run_backtest(self.conn, CFG, ["2025"], minutes=True)
+        m = result["seasons"]["2025"]["minutes"]
+        self.assertGreater(m["n"], 0)
+        self.assertLess(m["brier"]["model"]["start"], 0.1)
+        self.assertLess(m["brier"]["b2"]["start"], 0.1)
+        self.assertIn("b1", m["brier"])
+        self.assertTrue(m["reliability"])
+
+    def test_paired_summary_and_format(self):
+        self.pool()
+        with mock.patch.object(backtest, "load_default", lambda: None):
+            result = run_backtest(self.conn, CFG, ["2025"], minutes=True)
+        season = result["seasons"]["2025"]
+        self.assertEqual(set(season["paired"]), {"mae", "rank"})
+        self.assertLessEqual({"n", "mean", "ci", "t", "df", "p_signflip"}, set(season["paired"]["mae"]))
+        self.assertIn("mae_oracle", season["oracle"])
+        text = format_backtest(result)
+        self.assertIn("v1m vs v1", text)
+        self.assertIn("minutes error share", text)
+        self.assertIn("start-odds score", text)
+
+
 class BacktestCliTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

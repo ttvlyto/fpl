@@ -136,7 +136,7 @@ def cmd_build(cfg, conn, args):
 def cmd_backtest(cfg, conn, args):
     if conn.execute("SELECT 1 FROM sleeper_stats LIMIT 1").fetchone() is None:
         raise BuildError("no Sleeper stats yet; run fetch-history first")
-    result = run_backtest(conn, cfg, args.season or None)
+    result = run_backtest(conn, cfg, args.season or None, minutes=args.minutes)
     print(format_backtest(result))
     if args.json:
         Path(args.json).write_text(json.dumps(result, indent=2))
@@ -215,6 +215,7 @@ def main(argv=None):
         if name == "backtest":
             p.add_argument("--season", action="append", help="season to replay (repeatable; default: all stored)")
             p.add_argument("--json", help="also write the full results to this file")
+            p.add_argument("--minutes", action="store_true", help="also score the minutes model's start odds")
         if name == "fit-minutes":
             p.add_argument("--force", action="store_true", help="refit even if no new week is stored")
             p.add_argument("--export", help="also write the fitted model to this JSON file")
