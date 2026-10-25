@@ -171,6 +171,31 @@ class DropChoiceTests(unittest.TestCase):
         self.assertAlmostEqual(tips[0].gain, 4)
 
 
+class SequentialSwapTests(unittest.TestCase):
+    def test_later_tips_measured_after_earlier_ones(self):
+        # Alone, B->X and S->Y each lift the XI; together the XI only gains once.
+        roster = [p("S", "MID", 5), p("B", "MID", 1)]
+        tips = swap_tips(roster, [fa("X", "MID", 9), fa("Y", "MID", 8)], ["MID"], ELIG, 1.0, 3)
+        self.assertEqual([(t.drop.sleeper_id, t.add.sleeper_id, t.kind) for t in tips],
+                         [("B", "X", "xi"), ("S", "Y", "bench")])
+        self.assertAlmostEqual(tips[0].gain, 4)
+        self.assertAlmostEqual(tips[1].gain, 3)
+
+    def test_xi_gains_add_up(self):
+        roster = [p("G", "GK", 4), p("D1", "DEF", 3), p("D2", "DEF", 2), p("M", "MID", 1), p("BD", "DEF", 0)]
+        fas = [fa("X", "DEF", 9), fa("Y", "DEF", 8), fa("Z", "MID", 7)]
+        slots = ["GK", "DEF", "DEF", "MID"]
+        tips = swap_tips(roster, fas, slots, ELIG, 1.0, 3)
+        xi = [t for t in tips if t.kind == "xi"]
+        self.assertGreater(len(xi), 1)
+        after = list(roster)
+        for t in tips:
+            after = [pl for pl in after if pl.sleeper_id != t.drop.sleeper_id] + [t.add]
+        self.assertAlmostEqual(sum(t.gain for t in xi),
+                               best_xi(after, slots, ELIG).total - best_xi(roster, slots, ELIG).total)
+        self.assertFalse({t.add.sleeper_id for t in tips} & {t.drop.sleeper_id for t in tips})
+
+
 class UndroppableTests(unittest.TestCase):
     def test_undroppable_never_suggested_as_drop(self):
         keep = p("S", "MID", 0)

@@ -123,13 +123,28 @@ def swap_tips(roster, free_agents, slots, eligibility, min_gain, max_swaps):
     "bench": the XI is unchanged but a bench player is replaced by someone
     whose value() (blend of AVG and PROJ) is at least `min_gain` higher.
     Never empties a lineup slot, never drops an unmatched, IR or undroppable player.
+    Tips are picked one at a time, each measured on the roster after the earlier
+    ones, so their XI gains add up to what making all of them gains.
     """
-    base = best_xi(roster, slots, eligibility)
-    bench_ids = {pl.sleeper_id for pl in base.bench}
-    drops = [pl for pl in roster if pl.fpl_id is not None and not pl.in_reserve and not pl.undroppable]
     adds = sorted((pl for pl in free_agents if pl.fpl_id is not None and pl.flag != "out"),
                   key=lambda pl: (-pl.proj, pl.name))[:SWAP_CANDIDATE_POOL]
+    tips, roster, added = [], list(roster), set()
+    while len(tips) < max_swaps:
+        best = _best_swap(roster, adds, slots, eligibility, min_gain, added)
+        if best is None:
+            break
+        tips.append(best)
+        added.add(best.add.sleeper_id)
+        adds = [a for a in adds if a.sleeper_id != best.add.sleeper_id]
+        roster = [pl for pl in roster if pl.sleeper_id != best.drop.sleeper_id] + [best.add]
+    return tips
 
+
+def _best_swap(roster, adds, slots, eligibility, min_gain, added):
+    base = best_xi(roster, slots, eligibility)
+    bench_ids = {pl.sleeper_id for pl in base.bench}
+    drops = [pl for pl in roster if pl.fpl_id is not None and not pl.in_reserve and not pl.undroppable
+             and pl.sleeper_id not in added]
     candidates = []
     for d in drops:
         rest = [pl for pl in roster if pl.sleeper_id != d.sleeper_id]
@@ -142,20 +157,10 @@ def swap_tips(roster, free_agents, slots, eligibility, min_gain, max_swaps):
                 candidates.append(Swap(d, a, xi_gain, "xi"))
             elif d.sleeper_id in bench_ids and a.value() - d.value() >= min_gain:
                 candidates.append(Swap(d, a, a.value() - d.value(), "bench"))
-
     # Drops that bench the same starter tie on gain; then drop the weakest player, not the first name.
-    candidates.sort(key=lambda s: (s.kind != "xi", -round(s.gain, 6), s.drop.proj, s.drop.value(),
-                                   s.drop.name, s.add.name))
-    tips, used_drop, used_add = [], set(), set()
-    for s in candidates:
-        if len(tips) >= max_swaps:
-            break
-        if s.drop.sleeper_id in used_drop or s.add.sleeper_id in used_add:
-            continue
-        tips.append(s)
-        used_drop.add(s.drop.sleeper_id)
-        used_add.add(s.add.sleeper_id)
-    return tips
+    return min(candidates, default=None,
+               key=lambda s: (s.kind != "xi", -round(s.gain, 6), s.drop.proj, s.drop.value(),
+                              s.drop.name, s.add.name))
 
 
 def rank_free_agents(free_agents, per_position):

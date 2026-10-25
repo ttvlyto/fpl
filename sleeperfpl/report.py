@@ -16,7 +16,7 @@ from .availability import (LabelTable, apply_labels, audit_rows, chance_for, fpl
                            load_counts, rebuild_label_counts, slp_bucket)
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
-from .gameweek import MATCH_LENGTH, live_gameweek, season_of, target_gameweek, team_fixtures
+from .gameweek import MATCH_LENGTH, live_gameweek, matches_left, season_of, target_gameweek, team_fixtures
 from .gameweek import parse_time
 from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
@@ -162,6 +162,10 @@ def build_report(conn, cfg, now):
     deadline_passed = deadline is not None and deadline <= now
     finished = [e["event_id"] for e in events if e["finished"]]
     last_finished = max(finished) if finished else None
+    playing = live_gameweek(events, fixtures, now)
+    # Planning the next week while this one is played: its stats, minutes and news aren't in yet.
+    in_progress = ({"gameweek": playing, "matches_left": matches_left(fixtures, playing)}
+                   if playing and playing != gw.gw else None)
     overrides = load_overrides(cfg.overrides_path)
     codes = set(teams.values())
 
@@ -272,6 +276,7 @@ def build_report(conn, cfg, now):
         "projection_note": note,
         "gameweek": gw.gw,
         "mode": gw.mode,
+        "in_progress": in_progress,
         "first_kickoff": gw.first_kickoff.strftime("%Y-%m-%dT%H:%M:%SZ") if gw.first_kickoff else None,
         "stats_source": "sleeper" if use_sleeper else "fpl",
         "undroppable_unmatched": keep_unmatched,
@@ -740,6 +745,12 @@ def render_html(report):
              f'<div class="muted">Points: ' + ("Sleeper stats (exact league scoring)" if r.get("stats_source") == "sleeper"
                                                 else "FPL stats via scoring_map.json (approximate)") + '</div>',
              f'<div class="muted">Data as of — {asof}</div>']
+    ip = r.get("in_progress")
+    if ip and ip["matches_left"]:
+        left = ip["matches_left"]
+        parts.append(f'<div class="card banner">GW{_e(ip["gameweek"])} is still being played ({left} '
+                     f'match{"es" if left != 1 else ""} left). Its points, minutes and injury news aren\'t in these '
+                     f'numbers yet; rebuild after it finishes before you act on the tips.</div>')
     if r.get("undroppable_unmatched"):
         parts.append(f'<div class="card banner">undroppable in config.json matches no one on your roster: '
                      f'{_e(", ".join(r["undroppable_unmatched"]))}</div>')

@@ -65,6 +65,11 @@ def live_gameweek(events, fixtures, now):
     return max(live) if live else None
 
 
+def matches_left(fixtures, gw):
+    """Matches of game week `gw` FPL hasn't marked finished."""
+    return sum(1 for f in fixtures if f.get("event") == gw and not f.get("finished"))
+
+
 MATCH_LENGTH = timedelta(hours=2.5)
 
 

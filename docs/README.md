@@ -29,9 +29,10 @@ code layout.
 - **swap tips**, either an XI gain ("Drop X, add Y: +1.9 projected") or a
   "bench upgrade" (its gain is measured on the average/projection blend, not
   "projected"; `swap_min_gain` applies to both). When several drops give the
-  same gain, the tip drops the player with the lowest projection. Tips are
-  labelled as waiver claims
-  once the game week has started (players are instant free agents until the
+  same gain, the tip drops the player with the lowest projection. Each tip is
+  measured on the roster after the tips above it, so the XI gains add up to
+  what making all of them gains, and a player one tip adds is never another
+  tip's drop. Tips are labelled as waiver claims once the game week has started (players are instant free agents until the
   week's first kickoff, then go through waivers);
 - the **top free agents** per position, with Sleeper trending adds;
 - a **Matches** table from Kalshi and Polymarket odds: win/draw/win chances,

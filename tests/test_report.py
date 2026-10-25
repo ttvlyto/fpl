@@ -112,6 +112,17 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(r["sources"]["fpl_history_gw"], "8")
         json.dumps(r)
 
+    def test_week_in_progress_banner(self):
+        seed(self.conn)
+        self.assertIsNone(build_report(self.conn, self.cfg, NOW)["in_progress"])
+        self.conn.execute("INSERT INTO fpl_events VALUES (?,?,?,?)", (TS, 10, "2026-10-31T10:00:00Z", 0))
+        self.conn.execute("INSERT INTO fpl_fixtures VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                          (TS, 51, 10, 2, 1, 3, 4, "2026-10-31T15:00:00Z", 0, None, None))
+        r = build_report(self.conn, self.cfg, datetime(2026, 10, 24, 12, tzinfo=timezone.utc))
+        self.assertEqual((r["gameweek"], r["mode"]), (10, "waiver"))
+        self.assertEqual(r["in_progress"], {"gameweek": 9, "matches_left": 1})
+        self.assertIn("GW9 is still being played (1 match left)", render_html(r))
+
     def test_uses_latest_snapshot_after_failed_fetch(self):
         seed(self.conn, ts="2026-10-21T06:00:00Z", roster=("s1", "s6"))
         seed(self.conn, ts=TS)
