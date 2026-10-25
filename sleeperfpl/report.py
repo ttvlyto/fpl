@@ -667,23 +667,64 @@ def _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine,
 # ---------------------------------------------------------------- html
 
 CSS = """
-:root{--bg:#f6f7f9;--card:#fff;--fg:#1d1f23;--muted:#667;--line:#e3e5e8;--good:#2e9e5b;--mid:#888;--bad:#c0392b;--warn:#b35c00;--warnbg:#fff4e5}
-@media (prefers-color-scheme:dark){:root{--bg:#15171a;--card:#1f2226;--fg:#e8e9eb;--muted:#9aa0a8;--line:#30343a;--warnbg:#3a2a12;--warn:#ffb35c}}
+:root{--bg:#f3f4f6;--card:#fff;--fg:#16181d;--muted:#5b616c;--line:#e2e5ea;--soft:#eef0f3;--good:#2e9e5b;--mid:#888;--bad:#c0392b;
+--warn:#9a4a00;--warnbg:#fff4e5;--me:#1d4ed8;--them:#c2410c;--callout:#eef4ff;--callfg:#1e3a8a;--pitch:#2e7d4f;--pitchline:#256b42}
+@media (prefers-color-scheme:dark){:root{--bg:#121417;--card:#1d2024;--fg:#e8e9eb;--muted:#a3a9b2;--line:#30343a;--soft:#272b30;
+--warnbg:#3a2a12;--warn:#ffb35c;--me:#7aa2ff;--them:#ff9a5c;--callout:#1c2740;--callfg:#c7d7ff;--pitch:#24603d;--pitchline:#1b4d30}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-main{max-width:860px;margin:0 auto;padding:16px}
-h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:0 0 8px}
+main{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}h2{font-size:17px;margin:0 0 10px}h3{font-size:15px;margin:14px 0 6px}
 .muted{color:var(--muted);font-size:13px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:14px 0}
+.card-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px}
+.card-head h2{margin:0}
 .scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}
 th{text-align:left;color:var(--muted);font-weight:600;cursor:pointer;white-space:nowrap;padding:4px 6px;border-bottom:1px solid var(--line)}
 td{padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}td.num,th.num{text-align:right}
+tr.bench td{color:var(--muted)}
 small{color:var(--muted)}
 .fx{display:inline-block;color:#fff;padding:1px 6px;border-radius:4px;font-size:12px;margin-right:3px}
 .d1,.d2{background:var(--good)}.d3{background:var(--mid)}.d4,.d5{background:var(--bad)}
 .flag{font-size:12px;color:var(--warn)}
-.tip{background:var(--warnbg);color:var(--warn);border-radius:8px;padding:8px 10px;margin:6px 0}
-.banner{background:var(--warnbg);color:var(--warn);border-radius:8px;padding:8px 10px}
+.tip{background:var(--warnbg);color:var(--warn);border-radius:10px;padding:10px 12px;margin:8px 0}
+.banner{background:var(--warnbg);color:var(--warn);border-radius:10px;padding:10px 12px}
 [hidden]{display:none!important}
+.me{color:var(--me)}.them{color:var(--them)}
+.badge{position:relative;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;
+background:var(--soft);border:1px solid var(--line);vertical-align:middle;flex-shrink:0;overflow:hidden;color:var(--fg)}
+.badge b{font-size:8px;font-weight:700}
+.badge img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:var(--card)}
+.matchup .eyebrow{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.matchup .teams{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:10px;align-items:center;margin-top:8px}
+.tname{font-weight:700;font-size:17px;overflow-wrap:anywhere}
+.score{font-size:30px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-align:center;white-space:nowrap}
+.bar{display:flex;height:10px;border-radius:5px;overflow:hidden;margin-top:12px;background:var(--line)}
+.bar .me{background:var(--me)}.bar .them{background:var(--them)}
+.callout{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--callout);color:var(--callfg);font-size:14px}
+.seg{display:flex;background:var(--soft);border-radius:10px;padding:3px;gap:3px}
+.seg button{border:0;border-radius:8px;min-height:44px;padding:0 16px;background:transparent;color:var(--muted);font:inherit;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--card);color:var(--fg);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.15)}
+.sides{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:12px}
+.sides>div{min-width:0}
+.side-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+.pitch{background:var(--pitch) repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 44px,transparent 44px 88px);
+border:2px solid var(--pitchline);border-radius:12px;padding:12px 4px;display:flex;flex-direction:column;gap:12px}
+.prow{display:flex;justify-content:space-evenly;gap:2px}
+.chip{display:flex;flex-direction:column;align-items:center;width:62px;text-align:center}
+.chip .badge{width:34px;height:34px;background:#fff;border:2px solid rgba(255,255,255,.85);color:#16181d}
+.chip .badge.empty{background:transparent;border:2px dashed rgba(255,255,255,.75)}
+.chip .pn{margin-top:3px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;line-height:1.3;padding:1px 4px;border-radius:4px;
+max-width:62px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip .pp{margin-top:2px;background:#fff;color:#16181d;font-size:11px;font-weight:700;padding:0 5px;border-radius:4px}
+.chip.later .pp{background:rgba(255,255,255,.6)}
+.fx-row{display:grid;grid-template-columns:76px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.fx-row .when{font-size:13px;color:var(--muted)}
+.fx-team{display:flex;align-items:center;gap:8px;min-width:0;margin:2px 0}
+.fx-team .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fx-team .pc{margin-left:auto;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.cnts{display:flex;flex-direction:column;align-items:flex-end;gap:4px;min-width:56px}
+.cnt{font-size:12px;font-weight:700}
+.fx-detail{grid-column:2/4;font-size:12px;color:var(--muted)}
 """
 
 PAGE_JS = """

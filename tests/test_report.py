@@ -589,6 +589,17 @@ class MatchupPageTests(MatchupReportTests):
         self.assertIn("toLocaleString", page)
         self.assertIn("[hidden]{display:none", page)
 
+    def test_css_has_dark_mode_and_new_tokens(self):
+        from sleeperfpl.report import CSS
+        light, dark = CSS.split("prefers-color-scheme:dark", 1)
+        for token in ("--me:#1d4ed8", "--them:#c2410c", "--pitch:"):
+            self.assertIn(token, light)
+        for token in ("--me:#7aa2ff", "--them:#ff9a5c"):
+            self.assertIn(token, dark)
+        for cls in (".pitch", ".chip", ".badge", ".seg button", ".fx-row", ".matchup", ".sides"):
+            self.assertIn(cls, CSS)
+        self.assertIn("min-height:44px", CSS)
+
     def test_page_notice_only(self):
         page = render_html(self.build(schedule={"start_gw": 9, "end_gw": 31, "opponents": ["Nobody"]}))
         self.assertIn("Nobody", page)

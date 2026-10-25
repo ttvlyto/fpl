@@ -23,9 +23,26 @@ code layout.
 
 ## What the page shows
 
-`build` writes `site/index.html` with:
+`build` writes `site/index.html` with, from the top:
 
-- your **best starting XI**, using only lineups your league's roster slots allow;
+- a **matchup** card (needs a `schedule` in config.json): you against this
+  week's head-to-head opponent, with both teams' records and projected points
+  if each plays its strongest lineup, a bar comparing them, and what the
+  suggested swaps would do ("With all 3 suggested swaps your XI projects
+  95.1, ahead by 13.2"). The opponent's lineup is picked from their own
+  roster (not their IR) with the same projections and rules as yours. While a
+  scheduled week is being played, the card stays on that week and shows a
+  **live score** instead: both lineups as actually set in Sleeper, points so
+  far from Sleeper's stats, and how many starters each side still has to play.
+  When the week finishes it moves on to the next opponent. Weeks outside the
+  schedule (for example the playoffs) have no card;
+- **Starting XIs** for both sides with a **Pitch / List** switch (the page
+  remembers your choice on that phone). On the pitch each player sits in the
+  row of his first listed position, with his club badge, surname and points.
+  The list view for you is the full Best XI table with bench; during a live
+  week that table moves to its own **Best XI · GW<n>** card for the next week;
+- your **best starting XI** (as its own card when there is no matchup), using
+  only lineups your league's roster slots allow;
 - **swap tips**, either an XI gain ("Drop X, add Y: +1.9 projected") or a
   "bench upgrade" (its gain is measured on the average/projection blend, not
   "projected"; `swap_min_gain` applies to both). When several drops give the
@@ -41,8 +58,11 @@ code layout.
   injury news, fixtures, odds, head-to-head records), never this tool's
   projections or picks. Its XI is the lineup if you followed its swaps in full;
 - the **top free agents** per position, with Sleeper trending adds;
-- a **Matches** table from Kalshi and Polymarket odds: win/draw/win chances,
-  each team's expected goals and clean-sheet chance;
+- **Fixtures** for the week, with club badges and kickoff times in your
+  phone's time zone: each side's win chance from Kalshi and Polymarket odds,
+  plus draw chance, expected goals, clean-sheet chances and the odds' source
+  and age underneath. With a matchup, each fixture also shows how many of your
+  starters and theirs play in it ("You 3", "Them 2");
 - a **This week (live)** section during a game week: starters who may not
   play, and bench swaps for starters who got 0 minutes (each player locks at
   his own kickoff, so an unused starter can still be swapped for a bench
@@ -267,6 +287,7 @@ default. Unknown keys are silently ignored. `config.json` is git-ignored.
 | `minutes_model` | `"shadow"` | `"shadow"`: minutes estimates are logged and shown only; `"on"`: v1m/v2m drive picks |
 | `label_prior_k` | 20 | how many pseudo-players stand behind each label's starting guess before this league's outcomes take over |
 | `sleeper_label_weight` | 1.0 | 0 to 1: how much Sleeper's injury labels move the minutes estimate (0 ignores them) |
+| `schedule` | none | head-to-head opponents, which Sleeper's API doesn't provide for soccer: `{"start_gw": 9, "end_gw": 31, "opponents": ["Team A", "Team B", ...]}`. Game week `g` from `start_gw` to `end_gw` (default 38) faces `opponents[(g - start_gw) % len(opponents)]`, so the list repeats. Each name is matched to a Sleeper team name, then a username, ignoring case. Without it there is no matchup card; a name that matches no one shows a notice instead |
 | `second_opinion` | `{"enabled": false, "model": "claude-opus-5-5", "effort": "high", "lead_hours": 48}` | Claude's second opinion. `enabled` turns the `second-opinion` command on; `effort` is one of `low`, `medium`, `high`, `xhigh`, `max`; `lead_hours` is how long before the week's first kickoff it runs. Merged per key with the defaults. The API key is never read from here: set `ANTHROPIC_API_KEY` |
 | `minutes_shrink_k` | 3 | how many 90-minute matches of the position's average stand behind each player's v1m/v2m points per 90, so a player with a few minutes doesn't get an absurd rate (0 turns it off) |
 
@@ -366,6 +387,10 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
 
 ## Known limitations
 
+- **The schedule is typed in.** Sleeper's API returns no matchups for soccer
+  leagues, so the head-to-head schedule lives in `config.json`. If the league
+  changes it, edit `schedule`.
+
 - **Silent stats fallback.** `stats_source: "sleeper"` falls back to FPL stats
   plus `scoring_map.json` if the database has no Sleeper stats for the league's
   season. `report.json` `stats_source` shows what was actually used. In that
@@ -415,11 +440,12 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
   `sources`, `coverage`, `projection_note`, `xi`, `swaps`, `free_agents`,
   `matches`, `markets_unmatched`, `live`, `report_card`,
   `undroppable_unmatched`, `unmatched_rostered`, `unmatched_count`, `in_progress`,
-  `second_opinion`.
+  `second_opinion`, `matchup`, `badges`, `club_names`.
 
 Both files are written atomically (temp file, then rename). The page is
-self-contained (inline CSS and JS, no external assets) and tables sort when you
-click a header.
+self-contained (inline CSS and JS) apart from club badge images, which load
+from the Premier League's image server; if they don't load, a circle with the
+club code shows instead. Tables sort when you click a header.
 
 Details of `report.json` worth knowing:
 
@@ -446,8 +472,18 @@ Details of `report.json` worth knowing:
   null without one), `matches` (`log_loss`, `rps`,
   `brier_cs`) and `summary` (a string). `weeks`, `decisions` and `matches` keep
   the last 8 entries; `labels` is not trimmed.
-- `matches` entries always have `fixture_id`, `home`, `away`, `kickoff` and
-  `market`. `market` is `null` when unpriced; when priced they also have
+- `matchup` is `null` without a scheduled opponent this week. Otherwise it has
+  `gw`, `mode` (`"projected"` or `"live"`), `notice` (text when the schedule
+  name matched no team; then `me` and `them` are `null`), `me`, `them` and
+  `after_swaps` (your XI total after every suggested swap, projected mode only).
+  Each side has `name`, `username`, `record`, `total`, `formation`, `bench`
+  (projected mode) and `starters` (`slot`, `player`, and in live mode `points`
+  and `state`: `done`, `playing` or `to_play`); live sides also have `to_play`.
+- `badges` maps each club code to its FPL badge code (`null` until the next
+  `fetch-daily`); `club_names` maps it to the full name.
+- `matches` entries always have `fixture_id`, `home`, `away`, `kickoff`,
+  `market`, `mine` and `theirs` (starters of each side in that fixture, `null`
+  when the matchup is for another week). `market` is `null` when unpriced; when priced they also have
   `stale`, `sources`, `fetched_at`, `p_home`, `p_draw`, `p_away`, `lam_home`,
   `lam_away`, `cs_home`, `cs_away`.
 - Player objects carry `sleeper_id`, `name`, `positions`, `club`, `flag`, `avg`,
@@ -475,6 +511,7 @@ All free and keyless, except the Anthropic API (only for `second-opinion`).
 | Polymarket | `https://gamma-api.polymarket.com` | match odds |
 | football-data.co.uk | `https://www.football-data.co.uk/mmz4281/<yyYY>/E0.csv` | past Premier League results (head-to-heads) |
 | Anthropic API | `anthropic` Python package (`ANTHROPIC_API_KEY`) | Claude's second opinion |
+| Premier League images | `https://resources.premierleague.com/premierleague/badges/70/t<code>.png` | club badges, loaded by your browser when you view the page |
 
 Sleeper's week number is treated as the FPL game week.
 
@@ -490,11 +527,11 @@ every snapshot, which is the history a future prediction model would need.
 |---|---|
 | `sleeper_league` | `league_id`, `data_json` |
 | `sleeper_players` | `player_id`, `name`, `team`, `positions_json`, `status`, `injury_status`, `active` |
-| `sleeper_rosters` | `roster_id`, `owner_id`, `players_json`, `starters_json`, `reserve_json` |
-| `sleeper_users` | `user_id`, `display_name` |
+| `sleeper_rosters` | `roster_id`, `owner_id`, `players_json`, `starters_json`, `reserve_json`, `wins`, `losses`, `ties` |
+| `sleeper_users` | `user_id`, `display_name`, `team_name` |
 | `sleeper_trending` | `direction`, `player_id`, `count` |
 | `fpl_elements` | `fpl_id`, `first_name`, `second_name`, `web_name`, `team_id`, `element_type`, `status`, `chance_next`, `total_minutes`, `ep_next` (FPL's own expected points), `news`, `news_added`, `chance_this` (FPL's chance for the current round) |
-| `fpl_teams` | `team_id`, `short_name`, `name` |
+| `fpl_teams` | `team_id`, `short_name`, `name`, `code` (badge image number) |
 | `fpl_events` | `event_id`, `deadline_time`, `finished` |
 | `fpl_fixtures` | `fixture_id`, `event`, `team_h`, `team_a`, `team_h_difficulty`, `team_a_difficulty`, `kickoff_time`, `finished`, `team_h_score`, `team_a_score` |
 | `market_quotes` | `source`, `home`, `away`, `kickoff`, `market` (`1x2`/`total`/`team_total`/`btts`), `line`, `side`, `bid`, `ask`, `depth`, `ref` |
