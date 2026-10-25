@@ -1,0 +1,56 @@
+import unittest
+
+from sleeperfpl.metrics import (Scored, brier, category, error_summary, log_loss, mean, position_group,
+                                rank_by_position, rps, spearman)
+
+
+class MetricsTests(unittest.TestCase):
+    def test_mean(self):
+        self.assertIsNone(mean([]))
+        self.assertAlmostEqual(mean([1, 2]), 1.5)
+
+    def test_category(self):
+        self.assertEqual(category(None, 0, 3, 10), "dnp")
+        self.assertEqual(category({"min": 0}, 0, 3, 10), "dnp")
+        self.assertEqual(category({"min": 90}, -1, 3, 10), "low")
+        self.assertEqual(category({"min": 90}, 2.9, 3, 10), "low")
+        self.assertEqual(category({"min": 90}, 3, 3, 10), "mid")
+        self.assertEqual(category({"min": 90}, 10, 3, 10), "haul")
+
+    def test_position_group(self):
+        self.assertEqual(position_group(["D", "M"]), "DEF")
+        self.assertEqual(position_group(["FWD"]), "FWD")
+        self.assertIsNone(position_group([]))
+
+    def test_error_summary(self):
+        s = error_summary([Scored("MID", 4, 0, "dnp"), Scored("MID", 4, 5, "mid"), Scored("FWD", 2, 12, "haul")])
+        self.assertEqual((s["n"], s["n_played"]), (3, 2))
+        self.assertAlmostEqual(s["mae"], 5.0)
+        self.assertAlmostEqual(s["mae_played"], 5.5)
+        self.assertEqual(s["by_cat"]["dnp"], {"n": 1, "mae": 4.0})
+        self.assertEqual(s["by_cat"]["low"], {"n": 0, "mae": None})
+
+    def test_spearman(self):
+        self.assertAlmostEqual(spearman([1, 2, 3], [1, 2, 3]), 1.0)
+        self.assertAlmostEqual(spearman([1, 2, 3], [3, 2, 1]), -1.0)
+        self.assertAlmostEqual(spearman([1, 1, 2], [1, 2, 3]), 0.8660, places=4)
+        self.assertIsNone(spearman([0, 0, 0], [1, 2, 3]))     # all-equal projections
+        self.assertIsNone(spearman([1], [1]))
+
+    def test_rank_by_position(self):
+        mids = [Scored("MID", i, i, "mid") for i in range(5)]
+        fwds = [Scored("FWD", i, -i, "mid") for i in range(5)]
+        gks = [Scored("GK", i, i, "mid") for i in range(4)]       # too few: ignored
+        self.assertAlmostEqual(rank_by_position(mids + fwds + gks), 0.0)
+        self.assertIsNone(rank_by_position(gks))
+        self.assertIsNone(rank_by_position([Scored(None, i, i, "mid") for i in range(6)]))
+
+    def test_match_scores(self):
+        self.assertAlmostEqual(log_loss(0.5, 0.3, 0.2, "draw"), 1.2040, places=4)
+        self.assertAlmostEqual(log_loss(0.0, 0.0, 1.0, "home"), 13.8155, places=4)   # clamped, no domain error
+        self.assertAlmostEqual(rps(0.5, 0.3, 0.2, "home"), 0.145)
+        self.assertAlmostEqual(brier(0.3, True), 0.49)
+
+
+if __name__ == "__main__":
+    unittest.main()
