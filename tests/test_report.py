@@ -112,6 +112,23 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(r["sources"]["fpl_history_gw"], "8")
         json.dumps(r)
 
+    def test_build_report_fills_context_and_skips_logs_when_asked(self):
+        seed(self.conn)
+        self.cfg.stats_source = "sleeper"
+        league = {"sport": "s", "season": "2026", "roster_positions": ["GK", "MID", "MID", "BN", "BN"],
+                  "scoring_settings": {}}
+        self.conn.execute("INSERT INTO sleeper_league VALUES (?,?,?)", ("2026-10-22T07:00:00Z", "L1", json.dumps(league)))
+        self.conn.execute("INSERT INTO sleeper_stats VALUES (?,?,?,?,?)", ("2026", 8, "s2", json.dumps({"min": 90}), TS))
+        c = {}
+        build_report(self.conn, self.cfg, NOW, log=False, context=c)
+        self.assertEqual(c["ctx"]["s2"].name, "Bukayo Saka")
+        self.assertEqual(c["gw"].gw, 9)
+        self.assertEqual(c["season"], "2026")
+        self.assertIn("fodds", c)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM recommendation_log").fetchone()[0], 0)
+        build_report(self.conn, self.cfg, NOW)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM recommendation_log").fetchone()[0], 1)
+
     def test_week_in_progress_banner(self):
         seed(self.conn)
         self.assertIsNone(build_report(self.conn, self.cfg, NOW)["in_progress"])

@@ -76,5 +76,11 @@
   "minutes_model": "shadow",
   "label_prior_k": 20,
   "sleeper_label_weight": 1.0,
-  "minutes_shrink_k": 3
+  "minutes_shrink_k": 3,
+  "second_opinion": {
+    "enabled": false,
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "lead_hours": 48
+  }
 }

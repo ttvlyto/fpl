@@ -123,7 +123,9 @@ def _match_entry(f, teams, odds, stale):
                                                         "cs_home", "cs_away")}}
 
 
-def build_report(conn, cfg, now):
+def build_report(conn, cfg, now, *, log=True, context=None):
+    """The page's data. log=False skips every database write (the logs and label counts);
+    a `context` dict is filled with the inputs behind it (the second opinion reuses them)."""
     league_rows = _rows(conn, "sleeper_league")
     players = _rows(conn, "sleeper_players")
     rosters = _rows(conn, "sleeper_rosters")
@@ -192,7 +194,7 @@ def build_report(conn, cfg, now):
     trending = {t["player_id"]: t["count"] for t in _rows(conn, "sleeper_trending")}
 
     my_ids, reserve = set(mine["players"]), set(mine["reserve"])
-    mins = (_MinutesInputs(conn, cfg, sleeper_season, last_finished, fixtures, teams, now, scoring)
+    mins = (_MinutesInputs(conn, cfg, sleeper_season, last_finished, fixtures, teams, now, scoring, rebuild=log)
             if use_sleeper else None)
     ctx = {}
     for p in players:
@@ -241,8 +243,15 @@ def build_report(conn, cfg, now):
     swaps = swap_tips(roster, free_agents, slots, cfg.slot_eligibility, cfg.swap_min_gain, cfg.max_swaps)
     ranked = rank_free_agents(free_agents, cfg.free_agents_per_position)
 
+    if context is not None:
+        context.update(ctx=ctx, sleeper_players={p["player_id"]: p for p in players}, elements=el_by_id,
+                       match=dict(match.mapping), slots=slots, scoring=scoring, season=sleeper_season,
+                       last_finished=last_finished, gw=gw, mine=mine, taken=taken,
+                       fixtures=[f for f in fixtures if gw.gw and f.get("event") == gw.gw], teams=teams,
+                       fodds=fodds, lineup=lineup, swaps=swaps, use_sleeper=use_sleeper)
+
     made_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    if use_sleeper and gw.gw:
+    if log and use_sleeper and gw.gw:
         listed = [pl for group in ranked.values() for pl in group]
         log_projections(conn, sleeper_season, gw.gw, roster + listed, made_at,
                         label_at=latest_fetched_at(conn, "fpl_elements"))
@@ -350,7 +359,7 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
 class _MinutesInputs:
     """What every player's minutes estimate needs, loaded once per build."""
 
-    def __init__(self, conn, cfg, season, last_finished, fixtures, teams, now, scoring):
+    def __init__(self, conn, cfg, season, last_finished, fixtures, teams, now, scoring, rebuild=True):
         self.model = load_model(conn)
         self.rows = season_rows(conn, season, last_finished) if self.model else {}
         self.rates = PositionRates(scoring)
@@ -358,7 +367,7 @@ class _MinutesInputs:
             self.rates.add(rows)
         self.regular = regular_weeks(self.rows)
         self.before = (last_finished or 0) + 1
-        if self.model:
+        if self.model and rebuild:
             rebuild_label_counts(conn, season, last_finished, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.table = LabelTable(load_counts(conn, season), k=cfg.label_prior_k)
         self.excluded = hard_out_weeks(conn, season)     # sleeper id -> weeks FPL had him out

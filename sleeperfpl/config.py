@@ -42,9 +42,12 @@ DEFAULTS = {
     "label_prior_k": 20,           # pseudo-observations behind each label's starting guess
     "sleeper_label_weight": 1.0,   # 0 ignores Sleeper's injury labels in the minutes model
     "minutes_shrink_k": 3,         # pseudo-90s pulling v1m/v2m per-90 rates toward the position average
+    # Claude's second opinion: once per game week, lead_hours before its first kickoff.
+    "second_opinion": {"enabled": False, "model": "claude-opus-5-5", "effort": "high", "lead_hours": 48},
 }
 MINUTES_MODES = ("shadow", "on")
 STATS_SOURCES = ("sleeper", "fpl")
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
 REQUIRED = ("league_id", "owner")
 PATH_KEYS = ("db_path", "output_dir", "scoring_map_path", "overrides_path")
 
@@ -83,6 +86,20 @@ class Config:
     label_prior_k: float = 20
     sleeper_label_weight: float = 1.0
     minutes_shrink_k: float = 3
+    second_opinion: dict = field(default_factory=lambda: dict(DEFAULTS["second_opinion"]))
+
+
+def _second_opinion(raw, cfg_path):
+    so = {**DEFAULTS["second_opinion"], **raw}
+    try:
+        so["enabled"], so["model"], so["lead_hours"] = bool(so["enabled"]), str(so["model"]), float(so["lead_hours"])
+    except (TypeError, ValueError) as e:
+        raise ConfigError(f"{cfg_path}: bad second_opinion value: {e}")
+    if so["effort"] not in EFFORTS:
+        raise ConfigError(f"{cfg_path}: second_opinion effort must be one of {', '.join(EFFORTS)}")
+    if so["lead_hours"] <= 0:
+        raise ConfigError(f"{cfg_path}: second_opinion lead_hours must be more than 0")
+    return so
 
 
 def load_config(path: str | None = None) -> Config:
@@ -139,6 +156,7 @@ def load_config(path: str | None = None) -> Config:
             label_prior_k=float(merged["label_prior_k"]),
             sleeper_label_weight=float(merged["sleeper_label_weight"]),
             minutes_shrink_k=float(merged["minutes_shrink_k"]),
+            second_opinion=_second_opinion(raw.get("second_opinion") or {}, cfg_path),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:

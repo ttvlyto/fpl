@@ -21,6 +21,20 @@ class ConfigTests(unittest.TestCase):
         path.write_text(data if isinstance(data, str) else json.dumps(data))
         return path
 
+    def test_second_opinion_defaults_and_partial_merge(self):
+        cfg = load_config(str(self.write({"league_id": "1", "owner": "me"})))
+        self.assertEqual(cfg.second_opinion, {"enabled": False, "model": "claude-opus-5-5", "effort": "high",
+                                              "lead_hours": 48})
+        cfg = load_config(str(self.write({"league_id": "1", "owner": "me", "second_opinion": {"enabled": True}})))
+        self.assertTrue(cfg.second_opinion["enabled"])
+        self.assertEqual(cfg.second_opinion["lead_hours"], 48)
+
+    def test_second_opinion_bad_values_rejected(self):
+        for bad in ({"effort": "huge"}, {"lead_hours": 0}, {"lead_hours": "soon"}):
+            path = self.write({"league_id": "1", "owner": "me", "second_opinion": bad})
+            with self.assertRaisesRegex(ConfigError, "second_opinion"):
+                load_config(str(path))
+
     def test_defaults_and_relative_paths(self):
         path = self.write({"league_id": "123", "owner": "me"})
         cfg = load_config(str(path))
