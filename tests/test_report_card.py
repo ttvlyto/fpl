@@ -6,7 +6,7 @@ from sleeperfpl.lineup import Lineup, Swap
 from sleeperfpl.models import Fixture, PlayerCtx
 from sleeperfpl.pricing import FixtureOdds
 from sleeperfpl.report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_decisions,
-                                    score_weeks, summary)
+                                    score_matches, score_weeks, summary)
 
 SC = {"pos_m_g": 5}
 KO = "2026-10-24T14:00:00Z"
@@ -190,6 +190,37 @@ class DecisionTests(unittest.TestCase):
         decisions = [{"gw": 8, "set_pts": 5, "tool_pts": 9}, {"gw": 9, "set_pts": 9, "tool_pts": 5}]
         self.assertEqual(summary([], decisions), "the tool's XI beat your lineup in 1 of 2 weeks")
         self.assertEqual(summary([], decisions[:1]), "not enough weeks yet")
+
+
+class MatchScoreTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = connect(":memory:")
+
+    def fixture(self, h=1, a=0, finished=1):
+        self.conn.execute("INSERT INTO fpl_fixtures VALUES ('t', 50, 9, 1, 2, 3, 3, ?, ?, ?, ?)", (KO, finished, h, a))
+
+    def log(self, made_at="2026-10-23T10:00:00Z"):
+        self.conn.execute("INSERT INTO match_log VALUES (?, '2026', 9, 50, ?, 'market', 1.2, 0.9, 0.5, 0.3, 0.2, "
+                          "0.4, 0.3, 4, 0.02)", (made_at, KO))
+
+    def test_score_matches(self):
+        self.fixture()
+        self.log()
+        m = score_matches(self.conn, "2026", 9)[0]
+        self.assertEqual((m["gw"], m["n"]), (9, 1))
+        self.assertAlmostEqual(m["log_loss"], 0.6931, places=4)
+        self.assertAlmostEqual(m["rps"], 0.145)
+        self.assertAlmostEqual(m["brier_cs"], 0.225)
+
+    def test_finished_without_scores_skipped(self):
+        self.fixture(None, None)
+        self.log()
+        self.assertEqual(score_matches(self.conn, "2026", 9), [])
+
+    def test_log_after_kickoff_ignored(self):
+        self.fixture()
+        self.log("2026-10-24T15:00:00Z")
+        self.assertEqual(score_matches(self.conn, "2026", 9), [])
 
 
 class PairedComparisonTests(unittest.TestCase):

@@ -25,7 +25,7 @@ from .pricing import fixture_odds
 from .projection import project
 from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
 from .report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_decisions,
-                          score_weeks, summary)
+                          score_matches, score_weeks, summary)
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
 from .sleeper_stats import META as SLEEPER_STATS_META, has_stats, sleeper_points, sleeper_weeks
 
@@ -233,6 +233,7 @@ def build_report(conn, cfg, now):
             if use_sleeper else [])
     decisions = (score_decisions(conn, sleeper_season, scoring, last_finished, slots, cfg.slot_eligibility)
                  if use_sleeper else [])
+    match_card = score_matches(conn, sleeper_season, last_finished) if use_sleeper else []
     club_of = {sid: teams.get(el_by_id[fid]["team_id"]) for sid, fid in match.mapping.items() if fid in el_by_id}
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
                        {p["player_id"]: p for p in players}, sleeper_season, fodds, club_of, goal_quotes)
@@ -247,6 +248,7 @@ def build_report(conn, cfg, now):
         "live": live,
         "report_card": {"weeks": [_rounded(w) for w in card[-8:]],
                         "decisions": [_rounded(d) for d in decisions[-8:]],
+                        "matches": [_rounded(m) for m in match_card[-8:]],
                         "summary": summary(card, decisions)},
         "matches": matches,
         "markets_unmatched": markets_unmatched,

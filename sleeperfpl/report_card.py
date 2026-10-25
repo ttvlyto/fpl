@@ -8,7 +8,7 @@ import json
 
 from .db import latest
 from .lineup import best_xi
-from .metrics import Scored, brier, category, error_summary, mean, position_group, rank_by_position
+from .metrics import Scored, brier, category, error_summary, log_loss, mean, position_group, rank_by_position, rps
 from .models import PlayerCtx
 from .sleeper_stats import sleeper_points
 
@@ -150,6 +150,32 @@ def score_decisions(conn, season, scoring, last_finished, slots, eligibility):
                     "swaps": [{"drop": names.get(d, d), "add": names.get(a, a), "drop_pts": pts(d),
                                "add_pts": pts(a), "diff": pts(a) - pts(d)} for d, a in swaps]})
     return out
+
+
+def score_matches(conn, season, last_finished):
+    """Per finished week: log loss and RPS of the win/draw/loss odds, Brier of the
+    clean-sheet chances, using each fixture's last odds logged before kickoff."""
+    if last_finished is None:
+        return []
+    logged = {}
+    for fid, made_at, kickoff, ph, pd, pa, csh, csa in conn.execute(
+            "SELECT fixture_id, made_at, kickoff, p_home, p_draw, p_away, cs_home, cs_away FROM match_log "
+            "WHERE season = ? AND (kickoff IS NULL OR made_at <= kickoff) ORDER BY made_at", (season,)):
+        logged[fid] = (ph, pd, pa, csh, csa)
+    weeks = {}
+    for f in latest(conn, "fpl_fixtures"):
+        h, a = f["team_h_score"], f["team_a_score"]
+        if (not f["finished"] or h is None or a is None or f["fixture_id"] not in logged
+                or f["event"] is None or f["event"] > last_finished):
+            continue  # postponed, abandoned, unplayed or never priced
+        ph, pd, pa, csh, csa = logged[f["fixture_id"]]
+        outcome = "home" if h > a else "away" if a > h else "draw"
+        w = weeks.setdefault(f["event"], {"ll": [], "rps": [], "cs": []})
+        w["ll"].append(log_loss(ph, pd, pa, outcome))
+        w["rps"].append(rps(ph, pd, pa, outcome))
+        w["cs"].append((brier(csh, a == 0) + brier(csa, h == 0)) / 2)
+    return [{"gw": gw, "n": len(w["ll"]), "log_loss": mean(w["ll"]), "rps": mean(w["rps"]),
+             "brier_cs": mean(w["cs"])} for gw, w in sorted(weeks.items())]
 
 
 def summary(weeks, decisions=None):
