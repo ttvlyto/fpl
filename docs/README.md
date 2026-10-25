@@ -34,6 +34,12 @@ code layout.
   what making all of them gains, and a player one tip adds is never another
   tip's drop. Tips are labelled as waiver claims once the game week has started (players are instant free agents until the
   week's first kickoff, then go through waivers);
+- **Claude's second opinion** (when `second-opinion` has run for the week):
+  Claude's own XI, drops/adds and matchup notes, each with a one-line reason,
+  marked where it agrees with this page's picks ("Agrees on 9 of 11
+  starters"). Claude sees raw data only (recent league points and minutes,
+  injury news, fixtures, odds, head-to-head records), never this tool's
+  projections or picks. Its XI is the lineup if you followed its swaps in full;
 - the **top free agents** per position, with Sleeper trending adds;
 - a **Matches** table from Kalshi and Polymarket odds: win/draw/win chances,
   each team's expected goals and clean-sheet chance;
@@ -112,12 +118,14 @@ paths inside the config (`db_path`, `output_dir`, `scoring_map_path`,
 | `fetch-rosters` | Sleeper rosters and trending adds. |
 | `fetch-status` | FPL bootstrap only (injury flags, chances, news), cheap enough to run around press conferences. |
 | `fetch-history [--force]` | Sleeper weekly stats (`sleeper_stats`) plus the FPL per-match history crawl (`fpl_history`, always run regardless of `stats_source`). The Sleeper step fetches every stored-missing week up to the last finished game week and re-fetches the latest stored week on every run, so once at least one game week has finished the command is never a pure no-op (before that, it does nothing). The FPL crawl is skipped unless a new game week has finished since the last complete crawl; `--force` re-crawls. The crawl fetches every player with minutes > 0, one request per player at `fpl_request_interval`; if any player fails, the "last crawled" marker is not advanced and the next run retries. With `--season <year>` (a past season) it only fetches that season's Sleeper stats, weeks 1–38, for `backtest`; it skips the FPL crawl and doesn't change the stats week shown on the page. |
+| `fetch-results [--from SEASON] [--force]` | Past Premier League results from football-data.co.uk (one free CSV per season), from `--from` (default 2010) to last season, into `match_results`, for head-to-head records. Club names are mapped to FPL's (`results_teams` in `overrides.json` fixes the rest). Seasons already stored are skipped unless `--force`. This season's results come from the FPL fixtures instead. |
 | `coverage` | Reads only `scoring_map.json` and the stored league (no DB writes). Lists the rules, which ones FPL can and can't cover, league scoring keys missing from the map or with different points, and makes two live probes of Sleeper's stats endpoints (`api.sleeper.app` and `api.sleeper.com`; see Data sources). |
 | `fetch-markets` | Kalshi and Polymarket match odds (no player markets; those come from `matchday`). A source that fails with a fetch error (network, HTTP or bad JSON) warns, keeps the previous odds and doesn't stop the other. Any other kind of error (for example an unexpected response shape) is not caught and aborts the command with a traceback, so the second source may not run. |
 | `matchday [--force]` | For match days. Runs only if a kickoff falls within the next `matchday_window_hours`, or a match kicked off between 2.5 and 5 hours ago (just finished; this post-match window is fixed, not configurable). `--force` runs anyway. When it runs it refreshes rosters, the FPL bootstrap (injury flags and chances), fixtures, Kalshi odds including player markets, Polymarket odds, and (if a game week is live) Sleeper stats for that game week, then runs `build`. It refreshes everything, not only fixtures kicking off soon; the window only decides whether it runs. A failure in `build` itself is not caught and exits 1. Each step that fails only prints `warning: <step> failed` and the rest continue. When not due it prints a "skipped" line, does not build, and exits 0. |
 | `backtest [--season S] [--json PATH] [--minutes]` | Replays finished game weeks, starting at game week 2 (game week 1 has no earlier weeks and is never scored), to compare projection methods (`v1`, a naive `season_avg` and `v1m`). Needs Sleeper stats (`fetch-history`), else it exits with an error. For week *g* it uses only each player's Sleeper stats from earlier weeks of the same season, scores every player who played in one of the 5 weeks before, and prints per week the average miss (everyone / played only) and how well each method ordered players within each position, then how many weeks each method beat `v1`. Seasons are reported separately. `--season` (repeatable) picks seasons, default all stored. `--json` also writes the full results. Past seasons have no fixture data, so `v1` runs with a neutral multiplier there and blank or double weeks are skipped. `v1m` refits the minutes model for each week on earlier weeks only (needs 1,500 rows, else the shipped default if it is from an earlier season, else that week has no v1m); the output adds the per-week difference v1m − v1 with a 95% range and a sign-flip p-value, and the "minutes error share" (v1m's miss against v1m given each player's actual minutes). `--minutes` also prints Brier scores for P(start), P(appear) and P(60+) against two baselines (last week; last 5 weeks) and a reliability table. Read-only. |
 | `fit-minutes [--force] [--export PATH]` | Refits the start model on every stored regular week and saves it (`minutes_model`); prints the rows used and a holdout Brier score on the newest season's last 4 weeks. Does nothing if no new week was stored since the last fit, unless `--force`. `--export` also writes the model as JSON (the shipped default came from a 2025-only fit). |
 | `label-audit` | Rebuilds and prints, per injury label, how many logged players had it and how often they started, played (with a 90% range) and reached 60 minutes. "Sleeper says Out, FPL says available" comes first. Empty until weeks finish after builds have logged labels. |
+| `second-opinion [--force]` | Asks Claude (Anthropic API) for its own XI, swaps and matchup notes for the target game week and saves the answer in `second_opinion_log`; `build` shows the newest one. Does nothing unless `second_opinion.enabled` is true. Runs once per game week: only when the week's first kickoff is less than `second_opinion.lead_hours` away and no answer is saved for it yet (otherwise it prints "not due" without fetching anything). When due it refreshes rosters, trending adds and FPL injury news first. `--force` asks again regardless. The answer is checked against the league's rules (legal slots, real players, droppable drops, listed free agents, at most `max_swaps`); a broken answer gets one retry with the problems listed, then the command fails and saves nothing. Needs `ANTHROPIC_API_KEY` and the `anthropic` package. Costs about $0.30 a run on Opus. |
 | `build` | Writes `report.json` and `index.html` to `output_dir` (via a temp file and rename) and, when it uses Sleeper stats and there is a target game week, appends to `projection_log`, `recommendation_log` and `match_log`. When it uses Sleeper stats and a minutes model exists (a default one ships) it also rebuilds `label_counts` (a database write during a build). Prints `wrote <dir>/index.html (GW<n>, <k> swap tips)`. |
 
 Every command first opens the database, creating `data/` and all tables if
@@ -250,6 +258,7 @@ default. Unknown keys are silently ignored. `config.json` is git-ignored.
 | `minutes_model` | `"shadow"` | `"shadow"`: minutes estimates are logged and shown only; `"on"`: v1m/v2m drive picks |
 | `label_prior_k` | 20 | how many pseudo-players stand behind each label's starting guess before this league's outcomes take over |
 | `sleeper_label_weight` | 1.0 | 0 to 1: how much Sleeper's injury labels move the minutes estimate (0 ignores them) |
+| `second_opinion` | `{"enabled": false, "model": "claude-opus-5-5", "effort": "high", "lead_hours": 48}` | Claude's second opinion. `enabled` turns the `second-opinion` command on; `effort` is one of `low`, `medium`, `high`, `xhigh`, `max`; `lead_hours` is how long before the week's first kickoff it runs. Merged per key with the defaults. The API key is never read from here: set `ANTHROPIC_API_KEY` |
 | `minutes_shrink_k` | 3 | how many 90-minute matches of the position's average stand behind each player's v1m/v2m points per 90, so a player with a few minutes doesn't get an absurd rate (0 turns it off) |
 
 ## `scoring_map.json`
@@ -294,11 +303,14 @@ guessed, and the page lists unmatched rostered players.
 ```json
 {"players": {"<sleeper_player_id>": <fpl_id>},
  "clubs": {"<sleeper club code>": "<FPL short name>"},
- "market_teams": {"kalshi:<code>": "<FPL short name>", "polymarket:<code>": "<FPL short name>"}}
+ "market_teams": {"kalshi:<code>": "<FPL short name>", "polymarket:<code>": "<FPL short name>"},
+ "results_teams": {"<football-data.co.uk name>": "<FPL full team name>"}}
 ```
 
 The page also lists betting markets it couldn't match to a fixture; add those
-under `market_teams`. `market_teams` keys are normalised to lowercase source and
+under `market_teams`. `results_teams` maps club names in football-data.co.uk's
+results to FPL's full names (`fpl_teams.name`, e.g. "Man Utd"); a few are
+built in. `market_teams` keys are normalised to lowercase source and
 uppercase code. A missing file means no overrides; invalid JSON or shape is a
 config error. Overrides win over automatic matching, including when two Sleeper
 players claim the same FPL id. FPL player ids can change between seasons, so
@@ -326,7 +338,14 @@ season for the same reason).
      injury flags before kickoffs). At 03:30 on those days it collides with the
      `fetch-history` job; they share one non-blocking `flock`, so whichever
      starts second silently doesn't run.
-4. Install `deploy/sleeperfpl-web.service` (instructions at the top of the
+4. For Claude's second opinion (optional): `pip install -r requirements.txt`,
+   create an API key at platform.claude.com (billed separately from a Claude.ai
+   subscription; set a monthly spend limit there), put
+   `ANTHROPIC_API_KEY=<key>` on its own line at the top of the crontab, and set
+   `"second_opinion": {"enabled": true}` in `config.json`. The crontab runs
+   `second-opinion` hourly at :50; it only calls the API once per game week.
+   `fetch-results` runs with `fetch-history` at 03:30.
+5. Install `deploy/sleeperfpl-web.service` (instructions at the top of the
    file) to serve `site/` at `http://<server>:8080/` with Python's
    `http.server`. Keep port 8080 closed on your router.
 
@@ -372,8 +391,12 @@ jobs. The systemd unit runs `python3 -m http.server 8080 --directory
 - **No rollback past this version.** The database gains columns that older
   code can't write to; going back to an older version needs a database backup
   from before the upgrade.
-- **Planned, not built:** a prediction model to replace the projection step, and
-  a Claude "second opinion" that reads `site/report.json`.
+- **Claude's second opinion can be wrong.** Its picks are checked against the
+  league's rules, but its reasons and the numbers it quotes are not checked
+  against the data. Head-to-head records cover Premier League meetings only
+  (no cups), and a club name football-data.co.uk spells differently from FPL
+  needs a `results_teams` override or its history is missed.
+- **Planned, not built:** a prediction model to replace the projection step.
 
 ## Outputs
 
@@ -431,7 +454,7 @@ Details of `report.json` worth knowing:
 
 ## Data sources
 
-All free, no API keys.
+All free and keyless, except the Anthropic API (only for `second-opinion`).
 
 | Source | Base URL | Used for |
 |---|---|---|
@@ -441,6 +464,8 @@ All free, no API keys.
 | Fantasy Premier League | `https://fantasy.premierleague.com/api` | players, teams, game weeks, fixtures, per-match history |
 | Kalshi | `https://api.elections.kalshi.com/trade-api/v2` | match and player odds |
 | Polymarket | `https://gamma-api.polymarket.com` | match odds |
+| football-data.co.uk | `https://www.football-data.co.uk/mmz4281/<yyYY>/E0.csv` | past Premier League results (head-to-heads) |
+| Anthropic API | `anthropic` Python package (`ANTHROPIC_API_KEY`) | Claude's second opinion |
 
 Sleeper's week number is treated as the FPL game week.
 
@@ -480,6 +505,8 @@ missing columns in place.
 | `label_counts` | `(season, kind, cell)` | per injury label: players, starts, appearances, 60+ and expected starts/appearances, rebuilt each build from `projection_log` and `sleeper_stats` |
 | `match_log` | none (append-only) | every build's fitted odds per target-week fixture (`method`, `lam_home`, `lam_away`, win/draw/away and clean-sheet chances, `n_quotes`, `avg_spread`) |
 | `recommendation_log` | none (append-only) | every build's suggested XI (`xi_json`) and swaps (`swaps_json`), with `roster_id` and the week's `first_kickoff` |
+| `match_results` | `(season, date, home, away)` | past Premier League results from `fetch-results` (`home_goals`, `away_goals`); `season` is the start year, teams are FPL names |
+| `second_opinion_log` | none (append-only) | each Claude second opinion: `season`, `gw`, `first_kickoff`, `model`, `xi_json`, `swaps_json`, `notes_json`, `summary`, `input_tokens`, `output_tokens` |
 | `meta` | `key` | small key/value state |
 
 ## Code layout
@@ -489,11 +516,13 @@ sleeperfpl/
   __main__.py        CLI: the commands above
   config.py          load and validate config.json
   db.py              SQLite schema, snapshot helpers
-  http.py            GET JSON with retries and throttling
+  http.py            GET JSON (and text) with retries and throttling
   fetch_sleeper.py   Sleeper league, users, players, rosters, trending
   sleeper_stats.py   Sleeper weekly stats (exact league points)
   fetch_fpl.py       FPL bootstrap, fixtures, player history
   fetch_markets.py   Kalshi and Polymarket quotes
+  fetch_results.py   past Premier League results (football-data.co.uk)
+  headtohead.py      head-to-head records and recent form
   markets.py         team-code aliases, quote usability, fixture matching
   pricing.py         Poisson fit: quotes -> expected goals, win/draw, clean sheets
   scoring_map.py     scoring_map.json, coverage, FPL-based points
@@ -508,6 +537,7 @@ sleeperfpl/
   live.py            in-week alerts and 0-minute bench swaps
   report_card.py     projection accuracy per finished game week
   report.py          assemble report.json and render index.html
+  second_opinion.py  Claude's second opinion: input packet, API call, answer checks
   metrics.py         scoring functions shared by the report card and backtest
   backtest.py        replay past weeks to compare projection methods
   models.py          shared dataclasses

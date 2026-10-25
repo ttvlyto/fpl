@@ -1,5 +1,7 @@
 # Sleeper EPL rankings: install with `crontab -e` on the server.
 # Times are server local time. flock stops runs from overlapping.
+# For Claude's second opinion, put your API key on its own line above the jobs:
+# ANTHROPIC_API_KEY=sk-ant-...
 # `;` (not &&) so the page is rebuilt from the last good data even if a fetch fails.
 # Create the log directory first: mkdir -p /opt/sleeper_fpl/data
 # Assumes the repo lives at /opt/sleeper_fpl; change the path if not.
@@ -7,9 +9,10 @@
 # Daily: league, players, FPL bootstrap + fixtures
 0 6 * * *     cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-daily ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
-# Daily: FPL match history (no-op unless a new game week has finished), then refit the minutes model
+# Daily: FPL match history (no-op unless a new game week has finished), past results (no-op once stored),
+# then refit the minutes model
 # (fit-minutes skips itself when no new week is stored)
-30 3 * * *    cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-history ; python3 -m sleeperfpl fit-minutes ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
+30 3 * * *    cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-history ; python3 -m sleeperfpl fetch-results ; python3 -m sleeperfpl fit-minutes ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
 
 # Every 4 hours: rosters + trending adds
 0 */4 * * *   cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl fetch-rosters ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
@@ -29,3 +32,7 @@
 # Match days (Fri-Mon), every 30 minutes: does nothing unless a match kicks off within
 # matchday_window_hours or just finished; then refreshes lineups, odds, player markets, live stats
 */30 * * * 5,6,0,1 cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock python3 -m sleeperfpl matchday >> data/cron.log 2>&1
+
+# Hourly at :50: Claude's second opinion. Does nothing (no fetch, no API call) unless it's enabled in
+# config.json, the next game week starts within second_opinion.lead_hours and no opinion is saved yet.
+50 * * * *    cd /opt/sleeper_fpl && flock -n /tmp/sleeperfpl.lock sh -c 'python3 -m sleeperfpl second-opinion ; python3 -m sleeperfpl build' >> data/cron.log 2>&1
