@@ -163,7 +163,8 @@ class DecisionTests(unittest.TestCase):
                               (pid, json.dumps({"min": 90, "pos_m_g": g})))
 
     def roster(self, starters, fetched_at="2026-10-23T20:00:00Z"):
-        self.conn.execute("INSERT INTO sleeper_rosters VALUES (?, 3, 'u1', ?, ?, '[]')",
+        self.conn.execute("INSERT INTO sleeper_rosters (fetched_at, roster_id, owner_id, players_json, starters_json, reserve_json) "
+                          "VALUES (?, 3, 'u1', ?, ?, '[]')",
                           (fetched_at, json.dumps(["a", "b", "c"]), json.dumps(starters)))
 
     def recommend(self, xi, swaps=(), made_at="2026-10-23T10:00:00Z"):

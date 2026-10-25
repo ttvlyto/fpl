@@ -77,6 +77,21 @@ class DbTests(unittest.TestCase):
         self.assertLessEqual({"minutes_model", "label_counts"}, tables)
         conn.close()
 
+    def test_old_snapshot_tables_gain_new_columns(self):
+        path = self.tmp / "old3.db"
+        old = sqlite3.connect(path)
+        old.execute("CREATE TABLE sleeper_users (fetched_at, user_id, display_name)")
+        old.execute("CREATE TABLE sleeper_rosters (fetched_at, roster_id, owner_id, players_json, starters_json, reserve_json)")
+        old.execute("CREATE TABLE fpl_teams (fetched_at, team_id, short_name, name)")
+        old.commit()
+        old.close()
+        conn = connect(path)
+        cols = lambda t: [r[1] for r in conn.execute(f"PRAGMA table_info({t})")]
+        self.assertIn("team_name", cols("sleeper_users"))
+        self.assertLessEqual({"wins", "losses", "ties"}, set(cols("sleeper_rosters")))
+        self.assertIn("code", cols("fpl_teams"))
+        conn.close()
+
     def test_connect_twice_is_idempotent(self):
         connect(self.tmp / "sub" / "t.db").close()
 

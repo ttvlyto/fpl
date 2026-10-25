@@ -11,12 +11,12 @@ from pathlib import Path
 SNAPSHOT_TABLES = {
     "sleeper_league": "fetched_at, league_id, data_json",
     "sleeper_players": "fetched_at, player_id, name, team, positions_json, status, injury_status, active",
-    "sleeper_rosters": "fetched_at, roster_id, owner_id, players_json, starters_json, reserve_json",
-    "sleeper_users": "fetched_at, user_id, display_name",
+    "sleeper_rosters": "fetched_at, roster_id, owner_id, players_json, starters_json, reserve_json, wins, losses, ties",
+    "sleeper_users": "fetched_at, user_id, display_name, team_name",
     "sleeper_trending": "fetched_at, direction, player_id, count",
     "fpl_elements": ("fetched_at, fpl_id, first_name, second_name, web_name, team_id, "
                      "element_type, status, chance_next, total_minutes, ep_next, news, news_added, chance_this"),
-    "fpl_teams": "fetched_at, team_id, short_name, name",
+    "fpl_teams": "fetched_at, team_id, short_name, name, code",
     "fpl_events": "fetched_at, event_id, deadline_time, finished",
     "fpl_fixtures": ("fetched_at, fixture_id, event, team_h, team_a, team_h_difficulty, "
                      "team_a_difficulty, kickoff_time, finished, team_h_score, team_a_score"),

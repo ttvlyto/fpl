@@ -24,8 +24,8 @@ def fetch_league(conn, league_id, get=get_json):
     with conn:
         conn.execute("INSERT INTO sleeper_league VALUES (?, ?, ?)", (ts, league_id, json.dumps(league)))
         conn.executemany(
-            "INSERT INTO sleeper_users VALUES (?, ?, ?)",
-            [(ts, u["user_id"], u.get("display_name")) for u in users],
+            "INSERT INTO sleeper_users (fetched_at, user_id, display_name, team_name) VALUES (?, ?, ?, ?)",
+            [(ts, u["user_id"], u.get("display_name"), (u.get("metadata") or {}).get("team_name")) for u in users],
         )
     return league["sport"]
 
@@ -49,10 +49,12 @@ def fetch_rosters(conn, league_id, get=get_json):
     ts = now_iso()
     rows = [(ts, r.get("roster_id"), r.get("owner_id"),
              json.dumps(r.get("players") or []), json.dumps(r.get("starters") or []),
-             json.dumps(r.get("reserve") or []))
+             json.dumps(r.get("reserve") or []),
+             *((r.get("settings") or {}).get(k) for k in ("wins", "losses", "ties")))
             for r in rosters]
     with conn:
-        conn.executemany("INSERT INTO sleeper_rosters VALUES (?, ?, ?, ?, ?, ?)", rows)
+        conn.executemany("INSERT INTO sleeper_rosters (fetched_at, roster_id, owner_id, players_json, starters_json, "
+                         "reserve_json, wins, losses, ties) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
     return len(rows)
 
 

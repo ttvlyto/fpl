@@ -33,6 +33,22 @@ class FetchSleeperTests(unittest.TestCase):
         data = json.loads(latest(self.conn, "sleeper_league")[0]["data_json"])
         self.assertEqual(data["scoring_settings"], {"goal": 6})
 
+    def test_fetch_league_stores_team_names(self):
+        fetch_league(self.conn, "L1", get=fake({
+            "league/L1": {"sport": "s"},
+            "league/L1/users": [{"user_id": "u1", "display_name": "me", "metadata": {"team_name": "noSHOWdegaard"}},
+                                {"user_id": "u2", "display_name": "bt", "metadata": None}],
+        }))
+        names = {r["user_id"]: r["team_name"] for r in latest(self.conn, "sleeper_users")}
+        self.assertEqual(names, {"u1": "noSHOWdegaard", "u2": None})
+
+    def test_fetch_rosters_stores_record(self):
+        fetch_rosters(self.conn, "L1", get=fake({"league/L1/rosters": [
+            {"roster_id": 1, "owner_id": "u1", "players": [], "settings": {"wins": 4, "losses": 3, "ties": 0}},
+            {"roster_id": 2, "owner_id": "u2", "players": []}]}))
+        rows = {r["roster_id"]: (r["wins"], r["losses"], r["ties"]) for r in latest(self.conn, "sleeper_rosters")}
+        self.assertEqual(rows, {1: (4, 3, 0), 2: (None, None, None)})
+
     def test_fetch_players_keeps_everyone(self):
         n = fetch_players(self.conn, "s", get=fake({"players/s": {
             "1": {"player_id": "1", "full_name": "A B", "team": "ARS", "active": True, "fantasy_positions": ["MID"]},

@@ -52,6 +52,12 @@ class FetchFplTests(unittest.TestCase):
         self.assertEqual(len(latest(self.conn, "fpl_events")), 11)
         self.assertEqual(len(latest(self.conn, "fpl_elements")), 2)
 
+    def test_bootstrap_stores_team_code(self):
+        data = bootstrap()
+        data["teams"] = [{"id": 1, "short_name": "ARS", "name": "Arsenal", "code": 3}]
+        fetch_bootstrap(self.conn, get=Recorder({"bootstrap-static/": data}))
+        self.assertEqual(latest(self.conn, "fpl_teams")[0]["code"], 3)
+
     def test_bootstrap_stores_ep_next(self):
         data = bootstrap()
         data["elements"][0]["ep_next"] = "4.5"

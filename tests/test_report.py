@@ -31,14 +31,15 @@ def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
     names = names or {}
     league = {"sport": "s", "roster_positions": ["GK", "MID", "MID", "BN", "BN"], "scoring_settings": {}}
     conn.execute("INSERT INTO sleeper_league VALUES (?,?,?)", (ts, "L1", json.dumps(league)))
-    conn.executemany("INSERT INTO sleeper_users VALUES (?,?,?)", [(ts, "u1", "me"), (ts, "u2", "rival")])
+    conn.executemany("INSERT INTO sleeper_users (fetched_at, user_id, display_name) VALUES (?,?,?)", [(ts, "u1", "me"), (ts, "u2", "rival")])
     players = [("s1", "David Raya", "ARS", ["GK"], None), ("s2", "Bukayo Saka", "ARS", ["MID"], None),
                ("s3", "Declan Rice", "ARS", ["MID"], None), ("s4", "New Signing", "ARS", ["MID"], None),
                ("s5", "Cole Palmer", "CHE", ["MID"], None), ("s6", "Marc Cucurella", "CHE", ["DEF"], None)]
     conn.executemany("INSERT INTO sleeper_players VALUES (?,?,?,?,?,?,?,?)",
                      [(ts, pid, names.get(pid, n), t, json.dumps(pos), "Active", inj, 1)
                       for pid, n, t, pos, inj in players])
-    conn.executemany("INSERT INTO sleeper_rosters VALUES (?,?,?,?,?,?)",
+    conn.executemany("INSERT INTO sleeper_rosters (fetched_at, roster_id, owner_id, players_json, starters_json, "
+                     "reserve_json) VALUES (?,?,?,?,?,?)",
                      [(ts, 1, "u1", json.dumps(list(roster)), "[]", "[]"), (ts, 2, "u2", "[]", "[]", "[]")])
     conn.execute("INSERT INTO sleeper_trending VALUES (?,?,?,?)", (ts, "add", "s5", 40))
     elements = [(1, "David", "Raya", "Raya", 1, 1), (2, "Bukayo", "Saka", "Saka", 1, 3),
@@ -47,7 +48,7 @@ def seed(conn, ts=TS, roster=("s1", "s2", "s3", "s4"), names=None):
     conn.executemany("INSERT INTO fpl_elements VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      [(ts, fid, f, s, w, t, et, "a", None, 900, None, None, None, None)
                       for fid, f, s, w, t, et in elements])
-    conn.executemany("INSERT INTO fpl_teams VALUES (?,?,?,?)", [(ts, 1, "ARS", "Arsenal"), (ts, 2, "CHE", "Chelsea")])
+    conn.executemany("INSERT INTO fpl_teams (fetched_at, team_id, short_name, name) VALUES (?,?,?,?)", [(ts, 1, "ARS", "Arsenal"), (ts, 2, "CHE", "Chelsea")])
     conn.executemany("INSERT INTO fpl_events VALUES (?,?,?,?)", [(ts, 1, "2026-08-15T10:00:00Z", 1), (ts, 8, "2026-10-17T10:00:00Z", 1),
                                                                  (ts, 9, "2026-10-24T10:00:00Z", 0)])
     conn.execute("INSERT INTO fpl_fixtures VALUES (?,?,?,?,?,?,?,?,?,?,?)",

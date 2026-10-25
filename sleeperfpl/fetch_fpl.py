@@ -33,8 +33,8 @@ def fetch_bootstrap(conn, get=get_json):
              for e in data.get("elements", [])],
         )
         conn.executemany(
-            "INSERT INTO fpl_teams VALUES (?, ?, ?, ?)",
-            [(ts, t["id"], t.get("short_name"), t.get("name")) for t in data.get("teams", [])],
+            "INSERT INTO fpl_teams (fetched_at, team_id, short_name, name, code) VALUES (?, ?, ?, ?, ?)",
+            [(ts, t["id"], t.get("short_name"), t.get("name"), t.get("code")) for t in data.get("teams", [])],
         )
         conn.executemany(
             "INSERT INTO fpl_events VALUES (?, ?, ?, ?)",
