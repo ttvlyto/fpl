@@ -32,6 +32,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.free_agents_per_position, 10)
         self.assertEqual(cfg.slot_eligibility["GK"], ["GK"])
 
+    def test_category_cutoffs(self):
+        cfg = load_config(str(self.write({"league_id": "1", "owner": "me"})))
+        self.assertEqual((cfg.category_low, cfg.category_haul), (3, 10))
+        with self.assertRaises(ConfigError):
+            load_config(str(self.write({"league_id": "1", "owner": "me", "category_low": 10, "category_haul": 5})))
+
     def test_env_var_path(self):
         path = self.write({"league_id": "999", "owner": "me"}, "other.json")
         with mock.patch.dict(os.environ, {"SLEEPER_FPL_CONFIG": str(path)}):

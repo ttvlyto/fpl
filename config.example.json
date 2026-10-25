@@ -70,5 +70,7 @@
   "matchday_window_hours": 3,
   "league_avg_goals": 1.35,
   "flag_cs_gap": 0.25,
-  "flag_goal_gap": 0.2
+  "flag_goal_gap": 0.2,
+  "category_low": 3,
+  "category_haul": 10
 }

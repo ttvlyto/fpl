@@ -128,6 +128,8 @@ immediately.
 Builds that use Sleeper stats and have a target game week log their
 projections. After a game week finishes, the report card compares each
 player's last projection made before his kickoff with his real league points.
+Players who didn't play count too, as 0 points (or whatever their stats score),
+so a projection for someone who sat out is a miss.
 The report card needs those logs, so it is empty when stats come from FPL.
 
 ## Configuration (`config.json`)
@@ -160,6 +162,8 @@ default. Unknown keys are silently ignored. `config.json` is git-ignored.
 | `league_avg_goals` | 1.35 | expected-goals baseline when a team has no market history |
 | `flag_cs_gap` | 0.25 | clean-sheet gap that earns a ⚑ |
 | `flag_goal_gap` | 0.20 | goal-chance gap that earns a ⚑ |
+| `category_low` | 3 | league-point cutoffs for the report card's low / mid / haul groups: low is under `category_low`, haul is `category_haul` or more. `category_low` must be less than `category_haul` |
+| `category_haul` | 10 | see `category_low` |
 
 ## `scoring_map.json`
 

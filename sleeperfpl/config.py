@@ -34,6 +34,9 @@ DEFAULTS = {
     "league_avg_goals": 1.35,      # team expected-goals baseline when no market history exists
     "flag_cs_gap": 0.25,           # flag when history and market clean-sheet chances differ this much
     "flag_goal_gap": 0.20,         # same for a player's chance to score
+    # Report card outcome groups, in league points: low < category_low <= mid < category_haul <= haul.
+    "category_low": 3,
+    "category_haul": 10,
 }
 STATS_SOURCES = ("sleeper", "fpl")
 REQUIRED = ("league_id", "owner")
@@ -68,6 +71,8 @@ class Config:
     league_avg_goals: float = 1.35
     flag_cs_gap: float = 0.25
     flag_goal_gap: float = 0.20
+    category_low: float = 3
+    category_haul: float = 10
 
 
 def load_config(path: str | None = None) -> Config:
@@ -98,7 +103,7 @@ def load_config(path: str | None = None) -> Config:
     base = cfg_path.resolve().parent
     paths = {k: base / merged[k] for k in PATH_KEYS}
     try:
-        return Config(
+        cfg = Config(
             league_id=str(merged["league_id"]),
             owner=str(merged["owner"]),
             difficulty_multipliers={int(k): float(v) for k, v in multipliers.items()},
@@ -118,7 +123,12 @@ def load_config(path: str | None = None) -> Config:
             league_avg_goals=float(merged["league_avg_goals"]),
             flag_cs_gap=float(merged["flag_cs_gap"]),
             flag_goal_gap=float(merged["flag_goal_gap"]),
+            category_low=float(merged["category_low"]),
+            category_haul=float(merged["category_haul"]),
             **paths,
         )
     except (TypeError, ValueError, AttributeError) as e:
         raise ConfigError(f"Bad value in {cfg_path}: {e}")
+    if not cfg.category_low < cfg.category_haul:
+        raise ConfigError(f"{cfg_path}: category_low must be less than category_haul")
+    return cfg

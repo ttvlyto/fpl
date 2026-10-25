@@ -43,11 +43,50 @@ class ReportCardTests(unittest.TestCase):
         self.stats("a", {"min": 90, "pos_m_g": 1})
         self.assertAlmostEqual(score_weeks(self.conn, "2026", SC, 9)[0]["mae_v1"], 2.0)
 
-    def test_zero_minute_players_excluded(self):
-        log_projections(self.conn, "2026", 9, [pl("a", 4), pl("b", 4)], "2026-10-23T10:00:00Z")
+    def test_zero_minute_and_missing_players_scored(self):
+        log_projections(self.conn, "2026", 9, [pl("a", 4), pl("b", 4), pl("c", 4)], "2026-10-23T10:00:00Z")
         self.stats("a", {"min": 0})
-        self.stats("b", {"min": 90, "pos_m_g": 1})
-        self.assertEqual(score_weeks(self.conn, "2026", SC, 9)[0]["n"], 1)
+        self.stats("c", {"min": 90, "pos_m_g": 1})          # 5; b has no stats row at all
+        week = score_weeks(self.conn, "2026", SC, 9)[0]
+        self.assertEqual((week["n"], week["n_played"]), (3, 1))
+        self.assertAlmostEqual(week["mae_v1"], (4 + 4 + 1) / 3)
+        self.assertAlmostEqual(week["mae_v1_played"], 1.0)
+        self.assertEqual(week["by_cat_v1"]["dnp"]["n"], 2)
+
+    def test_categories_use_cutoffs(self):
+        log_projections(self.conn, "2026", 9, [pl("a", 4)], "2026-10-23T10:00:00Z")
+        self.stats("a", {"min": 90, "pos_m_g": 2.4})        # 12
+        self.assertEqual(score_weeks(self.conn, "2026", SC, 9)[0]["by_cat_v1"]["haul"]["n"], 1)
+        self.assertEqual(score_weeks(self.conn, "2026", SC, 9, haul=15)[0]["by_cat_v1"]["mid"]["n"], 1)
+
+    def test_rank_v1(self):
+        log_projections(self.conn, "2026", 9, [pl(f"p{i}", i) for i in range(1, 6)], "2026-10-23T10:00:00Z")
+        for i in range(1, 6):
+            self.stats(f"p{i}", {"min": 90, "pos_m_g": i})
+        self.assertAlmostEqual(score_weeks(self.conn, "2026", SC, 9)[0]["rank_v1"], 1.0)
+        self.conn.execute("DELETE FROM projection_log WHERE sleeper_id = 'p5'")
+        self.assertIsNone(score_weeks(self.conn, "2026", SC, 9)[0]["rank_v1"])
+
+    def test_rank_ep_paired(self):
+        players = []
+        for i in range(1, 6):
+            p = pl(f"p{i}", i)
+            p.ep_next = 6 - i
+            players.append(p)
+            self.stats(f"p{i}", {"min": 90, "pos_m_g": i})
+        log_projections(self.conn, "2026", 9, players, "2026-10-23T10:00:00Z")
+        week = score_weeks(self.conn, "2026", SC, 9)[0]
+        self.assertEqual(week["n_ep"], 5)
+        self.assertAlmostEqual(week["rank_ep"], -1.0)
+        self.assertAlmostEqual(week["rank_v1_ep"], 1.0)
+
+    def test_old_rows_without_position_still_score(self):
+        self.conn.execute("INSERT INTO projection_log (made_at, season, gw, sleeper_id, kickoff, v1, v2, p_goal_market) "
+                          "VALUES ('2026-10-23T10:00:00Z', '2026', 9, 'a', ?, 4, NULL, NULL)", (KO,))
+        self.stats("a", {"min": 90, "pos_m_g": 1})
+        week = score_weeks(self.conn, "2026", SC, 9)[0]
+        self.assertEqual(week["n"], 1)
+        self.assertIsNone(week["rank_v1"])
 
     def test_brier(self):
         log_projections(self.conn, "2026", 9, [pl("a", 4, p_goal=0.6)], "2026-10-23T10:00:00Z")

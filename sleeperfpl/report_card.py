@@ -6,7 +6,7 @@ last projection made before his kickoff is compared with his real league points.
 
 import json
 
-from .metrics import position_group
+from .metrics import Scored, brier, category, error_summary, mean, position_group, rank_by_position
 from .sleeper_stats import sleeper_points
 
 
@@ -47,16 +47,21 @@ def log_goal_odds(conn, season, gw, rows, made_at):
     return len(rows)
 
 
-def score_weeks(conn, season, scoring, last_finished):
+def score_weeks(conn, season, scoring, last_finished, low=3, haul=10):
+    """Per finished week: how far off and how well ordered the last pre-kickoff projections were.
+
+    Every logged player counts; one who didn't play (no stats row, or 0 minutes)
+    scores whatever his stats give, normally 0, in the "dnp" group.
+    """
     if last_finished is None:
         return []
     latest, goal = {}, {}
-    for made_at, gw, sid, kickoff, v1, v2, pg in conn.execute(
-            "SELECT made_at, gw, sleeper_id, kickoff, v1, v2, p_goal_market FROM projection_log "
+    for made_at, gw, sid, kickoff, v1, v2, pg, pos, ep in conn.execute(
+            "SELECT made_at, gw, sleeper_id, kickoff, v1, v2, p_goal_market, position, ep_next FROM projection_log "
             "WHERE season = ? AND gw <= ? AND (kickoff IS NULL OR made_at <= kickoff) ORDER BY made_at",
             (season, last_finished)):
         if v1 is not None:
-            latest[(gw, sid)] = (v1, v2)
+            latest[(gw, sid)] = (v1, v2, pos, ep)
         if pg is not None:
             goal[(gw, sid)] = pg
     actual = {(week, pid): json.loads(raw) for week, pid, raw in conn.execute(
@@ -66,25 +71,35 @@ def score_weeks(conn, season, scoring, last_finished):
     for key in set(latest) | set(goal):
         gw, sid = key
         stats = actual.get(key)
-        if not stats or (stats.get("min") or 0) <= 0:
-            continue  # didn't play: not a projection miss
-        pts = sleeper_points(stats, scoring)
-        w = weeks.setdefault(gw, {"gw": gw, "e1": [], "e1p": [], "e2": [], "b": []})
+        pts = sleeper_points(stats, scoring) if stats else 0.0
+        w = weeks.setdefault(gw, {"v1": [], "v2": [], "v1p": [], "ep": [], "v1e": [], "b": []})
         if key in latest:
-            v1, v2 = latest[key]
-            w["e1"].append(abs(v1 - pts))
+            v1, v2, pos, ep = latest[key]
+            cat = category(stats, pts, low, haul)
+            w["v1"].append(Scored(pos, v1, pts, cat))
             if v2 is not None:   # compare v1 and v2 on the same players
-                w["e2"].append(abs(v2 - pts))
-                w["e1p"].append(abs(v1 - pts))
-        if key in goal:
-            w["b"].append((goal[key] - (1.0 if (stats.get("g") or 0) >= 1 else 0.0)) ** 2)
+                w["v2"].append(Scored(pos, v2, pts, cat))
+                w["v1p"].append(Scored(pos, v1, pts, cat))
+            if ep is not None:   # ep_next is in FPL points: only its ordering is comparable
+                w["ep"].append(Scored(pos, ep, pts, cat))
+                w["v1e"].append(Scored(pos, v1, pts, cat))
+        if key in goal and stats and (stats.get("min") or 0) > 0:
+            w["b"].append(brier(goal[key], (stats.get("g") or 0) >= 1))
 
-    def mean(xs):
-        return sum(xs) / len(xs) if xs else None
-    return [{"gw": w["gw"], "n": len(w["e1"]), "mae_v1": mean(w["e1"]), "mae_v1_paired": mean(w["e1p"]),
-             "mae_v2": mean(w["e2"]),
-             "n_v2": len(w["e2"]), "brier_goal": mean(w["b"]), "n_goal": len(w["b"])}
-            for w in sorted(weeks.values(), key=lambda w: w["gw"])]
+    out = []
+    for gw in sorted(weeks):
+        w = weeks[gw]
+        e1 = error_summary(w["v1"])
+        out.append({"gw": gw, "n": e1["n"], "mae_v1": e1["mae"], "n_played": e1["n_played"],
+                    "mae_v1_played": e1["mae_played"], "by_cat_v1": e1["by_cat"],
+                    "rank_v1": rank_by_position(w["v1"]),
+                    "n_v2": len(w["v2"]), "mae_v2": error_summary(w["v2"])["mae"],
+                    "mae_v1_paired": error_summary(w["v1p"])["mae"],
+                    "rank_v2": rank_by_position(w["v2"]), "rank_v1_paired": rank_by_position(w["v1p"]),
+                    "n_ep": len(w["ep"]), "rank_ep": rank_by_position(w["ep"]),
+                    "rank_v1_ep": rank_by_position(w["v1e"]),
+                    "brier_goal": mean(w["b"]), "n_goal": len(w["b"])})
+    return out
 
 
 def summary(weeks):

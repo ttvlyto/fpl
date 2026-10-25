@@ -228,7 +228,8 @@ def build_report(conn, cfg, now):
         first = gw.first_kickoff.strftime("%Y-%m-%dT%H:%M:%SZ") if gw.first_kickoff else None
         log_recommendation(conn, sleeper_season, gw.gw, first, mine["roster_id"], lineup, swaps, made_at)
         log_matches(conn, sleeper_season, gw.gw, fodds, fixtures, made_at)
-    card = score_weeks(conn, sleeper_season, scoring, last_finished) if use_sleeper else []
+    card = (score_weeks(conn, sleeper_season, scoring, last_finished, cfg.category_low, cfg.category_haul)
+            if use_sleeper else [])
     club_of = {sid: teams.get(el_by_id[fid]["team_id"]) for sid, fid in match.mapping.items() if fid in el_by_id}
     live = _live_block(conn, cfg, now, events, fixtures, teams, codes, overrides, mine, ctx, slots,
                        {p["player_id"]: p for p in players}, sleeper_season, fodds, club_of, goal_quotes)
