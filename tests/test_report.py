@@ -282,6 +282,41 @@ class SleeperSourceReportTests(unittest.TestCase):
         self.assertEqual(r["coverage"]["missing"], [])
         self.assertNotIn("Approximate", render_html(r))
 
+    def seed_minutes(self):
+        for w in range(4, 9):
+            self.add_stats("s2", w, {"pos_m_g": 1, "min": 90, "gs": 1})
+            self.add_stats("s3", w, {"min": 20 if w % 2 else 0})
+
+    def test_minutes_fields_in_report(self):
+        self.seed_minutes()
+        r = build_report(self.conn, self.cfg, NOW)
+        saka = self.player(r, "Bukayo Saka")
+        self.assertTrue(0 < saka["p_start"] <= saka["p_app"] <= 1)
+        self.assertGreater(saka["p_start"], 0.7)
+        self.assertIsNotNone(saka["proj_v1m"])
+        self.assertEqual((saka["fpl_bucket"], saka["slp_bucket"]), ("a100", "none"))
+        rice = self.player(r, "Declan Rice")
+        self.assertLess(rice["p_start"], saka["p_start"])
+        self.assertEqual(saka["proj"], saka["proj_v1"])          # shadow: picks unchanged
+        self.assertIn("starts:", render_html(r))
+
+    def test_minutes_on_uses_v1m(self):
+        self.seed_minutes()
+        self.cfg.minutes_model = "on"
+        saka = self.player(build_report(self.conn, self.cfg, NOW), "Bukayo Saka")
+        self.assertEqual(saka["proj"], saka["proj_v1m"])
+
+    def test_builds_without_model(self):
+        from unittest import mock
+        from sleeperfpl import minutes_fit
+        self.seed_minutes()
+        with mock.patch.object(minutes_fit, "DEFAULT_PATH", self.tmp / "missing.json"):
+            r = build_report(self.conn, self.cfg, NOW)
+        saka = self.player(r, "Bukayo Saka")
+        self.assertIsNone(saka["p_start"])
+        self.assertIsNone(saka["proj_v1m"])
+        self.assertNotIn("starts:", render_html(r))
+
     def test_falls_back_to_fpl_without_sleeper_stats(self):
         r = build_report(self.conn, self.cfg, NOW)
         self.assertEqual(r["stats_source"], "fpl")

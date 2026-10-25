@@ -13,10 +13,13 @@ from .models import PlayerCtx
 from .sleeper_stats import sleeper_points, stored_weeks
 
 
-def log_projections(conn, season, gw, players, made_at):
+def log_projections(conn, season, gw, players, made_at, label_at=None):
+    """`label_at`: when the FPL snapshot behind this build's labels was fetched."""
     rows = [(made_at, season, gw, pl.sleeper_id, pl.fixtures[0].kickoff if pl.fixtures else None,
-             pl.proj_v1, pl.proj if pl.proj_source == "market" else None, pl.p_goal_market,
-             position_group(pl.positions), pl.ep_next) + (None,) * 13
+             pl.proj_v1, (pl.proj if pl.proj_v2 is None else pl.proj_v2) if pl.proj_source == "market" else None, pl.p_goal_market,
+             position_group(pl.positions), pl.ep_next, pl.proj_v1m, pl.proj_v2m, pl.p_start, pl.p_app, pl.p60,
+             pl.e_min, pl.fpl_bucket, pl.slp_bucket, pl.p_start_model, pl.p_app_model, pl.p_start_fpl,
+             pl.p_app_fpl, label_at if pl.p_start is not None else None)
             for pl in players if pl.fpl_id is not None]
     with conn:
         conn.executemany(f"INSERT INTO projection_log VALUES ({', '.join('?' * 23)})", rows)

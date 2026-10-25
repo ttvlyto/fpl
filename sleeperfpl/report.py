@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from .availability import chance_for, fpl_bucket, is_hard_out, slp_bucket
+from .availability import LabelTable, apply_labels, chance_for, fpl_bucket, fpl_stale, is_hard_out, slp_bucket
 from .db import latest, latest_fetched_at, meta_get
 from .fetch_fpl import HISTORY_META
 from .gameweek import MATCH_LENGTH, live_gameweek, season_of, target_gameweek, team_fixtures
@@ -21,10 +21,12 @@ from .lineup import best_xi, rank_free_agents, starting_slots, swap_tips
 from .matching import FPL_POSITIONS, load_overrides, match_players, normalize_name
 from .live import unlikely_to_play, zero_minute_replacements
 from .markets import find_fixture, latest_quotes, mid, team_code, usable
+from .minutes import fixture_minutes, history, last_season_start_share, player_minutes, regular_weeks, season_rows
+from .minutes_fit import load_model
 from .models import PlayerCtx
 from .pricing import fixture_odds
-from .projection import project
-from .projection_v2 import SLEEPER_PREFIX, project_v2, v2_inputs
+from .projection import minutes_rates, project, project_minutes
+from .projection_v2 import SLEEPER_PREFIX, project_v2, project_v2m, v2_inputs, v2m_inputs
 from .report_card import (log_goal_odds, log_matches, log_projections, log_recommendation, score_decisions,
                           score_matches, score_weeks, summary)
 from .scoring_map import coverage, flatten_scoring_settings, league_drift, load_scoring_map, score_match
@@ -77,6 +79,11 @@ def _player_dict(pl):
         "proj_v1": round(pl.proj_v1, 1), "proj_source": pl.proj_source, "market_flags": pl.market_flags,
         "p_goal_market": None if pl.p_goal_market is None else round(pl.p_goal_market, 2),
         "p_goal_hist": None if pl.p_goal_hist is None else round(pl.p_goal_hist, 2),
+        **{k: None if getattr(pl, k) is None else round(getattr(pl, k), 2) for k in ("p_start", "p_app", "p60")},
+        "e_min": None if pl.e_min is None else round(pl.e_min, 1),
+        "fpl_bucket": pl.fpl_bucket, "slp_bucket": pl.slp_bucket,
+        "proj_v1m": None if pl.proj_v1m is None else round(pl.proj_v1m, 1),
+        "proj_v2m": None if pl.proj_v2m is None else round(pl.proj_v2m, 1),
         "fixtures": [{"opponent": f.opponent, "home": f.home, "difficulty": f.difficulty, "kickoff": f.kickoff}
                      for f in pl.fixtures],
     }
@@ -180,6 +187,7 @@ def build_report(conn, cfg, now):
     trending = {t["player_id"]: t["count"] for t in _rows(conn, "sleeper_trending")}
 
     my_ids, reserve = set(mine["players"]), set(mine["reserve"])
+    mins = _MinutesInputs(conn, cfg, sleeper_season, last_finished, fixtures, teams, now) if use_sleeper else None
     ctx = {}
     for p in players:
         sid = p["player_id"]
@@ -206,6 +214,8 @@ def build_report(conn, cfg, now):
             pl.proj_v1 = pr.proj
             if use_sleeper:
                 _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg)
+            if mins and mins.model:
+                _apply_minutes(pl, pos, p, el, weeks, scoring, fodds, baseline, cfg, mins, deadline_passed)
         ctx[sid] = pl
     for sid in my_ids - set(ctx):
         # On the roster but absent from Sleeper's player map: show it, never hide it.
@@ -228,7 +238,8 @@ def build_report(conn, cfg, now):
     made_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     if use_sleeper and gw.gw:
         listed = [pl for group in ranked.values() for pl in group]
-        log_projections(conn, sleeper_season, gw.gw, roster + listed, made_at)
+        log_projections(conn, sleeper_season, gw.gw, roster + listed, made_at,
+                        label_at=latest_fetched_at(conn, "fpl_elements"))
         first = gw.first_kickoff.strftime("%Y-%m-%dT%H:%M:%SZ") if gw.first_kickoff else None
         log_recommendation(conn, sleeper_season, gw.gw, first, mine["roster_id"], lineup, swaps, made_at)
         log_matches(conn, sleeper_season, gw.gw, fodds, fixtures, made_at)
@@ -313,6 +324,7 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
                 parts.append((pl.avg or 0.0) * cfg.difficulty_multipliers[f.difficulty])
         if used:
             pl.proj, pl.proj_source = sum(parts), "market"
+            pl.proj_v2 = pl.proj
 
     first = fodds.get(pl.fixtures[0].fixture_id) if pl.fixtures else None
     if pos in ("GK", "DEF") and first:
@@ -325,6 +337,65 @@ def _apply_market(pl, pos, weeks, scoring, fodds, baseline, goal_quotes, cfg):
                         if pl.fixtures else None)
     if pl.p_goal_market is not None and abs(pl.p_goal_market - pl.p_goal_hist) >= cfg.flag_goal_gap:
         pl.market_flags.append("goal")
+
+
+class _MinutesInputs:
+    """What every player's minutes estimate needs, loaded once per build."""
+
+    def __init__(self, conn, cfg, season, last_finished, fixtures, teams, now):
+        self.model = load_model(conn)
+        self.rows = season_rows(conn, season, last_finished) if self.model else {}
+        self.regular = regular_weeks(self.rows)
+        self.before = (last_finished or 0) + 1
+        self.table = LabelTable(k=cfg.label_prior_k)
+        self.excluded = {}       # sleeper id -> weeks FPL had him out (filled from label history)
+        self._season, self._conn, self._last = season, conn, None
+        self.club_last = {}
+        for f in fixtures:
+            k = f.get("kickoff_time")
+            if k and parse_time(k) < now:
+                for code in (teams.get(f["team_h"]), teams.get(f["team_a"])):
+                    if code and k > self.club_last.get(code, ""):
+                        self.club_last[code] = k
+
+    def last_season(self):
+        if self._last is None:
+            prev = str(int(self._season) - 1) if self._season.isdigit() else ""
+            self._last = season_rows(self._conn, prev) if prev else {}
+        return self._last
+
+
+def _apply_minutes(pl, pos, sp, el, weeks, scoring, fodds, baseline, cfg, mins, deadline_passed):
+    """Shadow minutes projections; with minutes_model "on" they also replace proj."""
+    model = mins.model
+    hist = history(mins.rows, pl.sleeper_id, mins.before, mins.regular, mins.excluded.get(pl.sleeper_id, set()))
+    share = last_season_start_share(mins.last_season(), pl.sleeper_id) if len(hist) < 3 else None
+    pm = player_minutes(hist, pos, model, share)
+    pl.fpl_bucket = fpl_bucket(el["status"], chance_for(el, deadline_passed))
+    pl.slp_bucket = slp_bucket(sp.get("injury_status"))
+    stale = fpl_stale(el["news_added"], mins.club_last.get(pl.club))
+    pl.p_start_model, pl.p_app_model = pm.p_start, pm.p_app
+    pl.p_start_fpl, pl.p_app_fpl, pl.p_start, pl.p_app = apply_labels(
+        pm.p_start, pm.p_app, pl.fpl_bucket, pl.slp_bucket, stale, mins.table, cfg.sleeper_label_weight)
+    fm = fixture_minutes(pl.p_start, pl.p_app, pm.start_buckets, pm.sub_buckets)
+    pl.p60, pl.e_min = fm.p60, fm.e_min
+    recent = weeks[:cfg.avg_window]
+    lin90, cs60 = minutes_rates(recent, scoring)
+    mults = [cfg.difficulty_multipliers[f.difficulty] for f in pl.fixtures]
+    pl.proj_v1m = project_minutes(lin90, cs60, [fm] * len(pl.fixtures), mults)
+    inp = v2m_inputs(weeks, scoring, SLEEPER_PREFIX.get(pos, ""), cfg.avg_window)
+    if pl.proj_source == "market" and inp:
+        parts = []
+        for f, mult in zip(pl.fixtures, mults):
+            o = fodds.get(f.fixture_id)
+            if o:
+                own, opp = (o.lam_home, o.lam_away) if f.home else (o.lam_away, o.lam_home)
+                parts.append(project_v2m(inp, fm, own, opp, baseline.get(pl.club, cfg.league_avg_goals)))
+            else:
+                parts.append(project_minutes(lin90, cs60, [fm], [mult]))
+        pl.proj_v2m = sum(parts)
+    if cfg.minutes_model == "on":
+        pl.proj = pl.proj_v2m if pl.proj_v2m is not None else pl.proj_v1m
 
 
 def _club_minutes_in(minutes, club_of):
@@ -477,8 +548,21 @@ def _player_cells(p):
     return (f'<td>{_e(p["name"])} <small>{_e(pos)} {_e(p["club"])}</small>{flag}</td>'
             f'<td>{_fixtures_html(p)}</td>'
             f'<td class="num" data-v="{p["avg"] if p["avg"] is not None else -1}">{_num(p["avg"])} <small>({p["n"]})</small></td>'
-            f'<td class="num" data-v="{p["proj"]}" title="difficulty-only projection: {_num(p.get("proj_v1"))}">'
+            f'<td class="num" data-v="{p["proj"]}" title="difficulty-only projection: {_num(p.get("proj_v1"))}'
+            f'{_e(_minutes_hint(p))}">'
             f'<b>{_num(p["proj"])}</b>{mkt}</td>')
+
+
+def _minutes_hint(p):
+    """Hover text for the minutes estimate, e.g. " · starts: 85% · plays: 92% · FPL: d75 (estimate)"."""
+    if p.get("p_start") is None:
+        return ""
+    parts = [f"starts: {round(100 * p['p_start'])}%", f"plays: {round(100 * p['p_app'])}%"]
+    if p.get("fpl_bucket") and p["fpl_bucket"] != "a100":
+        parts.append(f"FPL: {p['fpl_bucket']}")
+    if p.get("slp_bucket") and p["slp_bucket"] != "none":
+        parts.append(f"Sleeper: {p['slp_bucket']}")
+    return " · " + " · ".join(parts) + " (estimate)"
 
 
 def _pct(x):

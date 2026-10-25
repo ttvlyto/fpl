@@ -121,6 +121,16 @@ class LoggingTests(unittest.TestCase):
         row = self.conn.execute("SELECT position, ep_next FROM projection_log").fetchone()
         self.assertEqual((row[0], row[1]), ("MID", 3.5))
 
+    def test_log_projections_minutes_columns(self):
+        p = pl("a", 4)
+        p.proj_v1m, p.p_start, p.p_app, p.p60, p.e_min = 3.2, 0.7, 0.8, 0.6, 60.0
+        p.fpl_bucket, p.slp_bucket, p.p_start_model, p.p_app_model = "a100", "out", 0.875, 0.9
+        p.p_start_fpl, p.p_app_fpl = 0.875, 0.9
+        log_projections(self.conn, "2026", 9, [p], "2026-10-23T10:00:00Z", label_at="2026-10-23T06:00:00Z")
+        row = self.conn.execute("SELECT v1m, v2m, p_start, fpl_bucket, slp_bucket, p_start_model, p_app_fpl, label_at "
+                                "FROM projection_log").fetchone()
+        self.assertEqual(tuple(row), (3.2, None, 0.7, "a100", "out", 0.875, 0.9, "2026-10-23T06:00:00Z"))
+
     def test_log_recommendation(self):
         lineup = Lineup([("M", pl("a", 4)), ("M", None)], [], 4.0, ["M"])
         swaps = [Swap(pl("b", 1), pl("c", 5), 4.0, "xi")]
