@@ -137,6 +137,20 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Waiver claim:", page)
         self.assertIn('name="viewport"', page)
 
+    def test_report_card_html(self):
+        seed(self.conn)
+        r = build_report(self.conn, self.cfg, NOW)
+        week = {"gw": 8, "n": 40, "mae_v1": 3.1, "mae_v1_played": 2.5, "mae_v2": None, "rank_v1": 0.42,
+                "brier_goal": None, "n_goal": 0}
+        r["report_card"] = {"weeks": [week], "summary": "not enough weeks yet", "matches": [],
+                            "decisions": [{"gw": 8, "set_pts": 7, "tool_pts": 13, "best_pts": 15, "swaps": []}]}
+        page = render_html(r)
+        for text in ("Order", "0.42", "Your XI", ">13.0<", ">15.0<"):
+            self.assertIn(text, page)
+        self.assertNotIn("Log loss", page)
+        r["report_card"]["matches"] = [{"gw": 8, "n": 10, "log_loss": 0.98, "rps": 0.2, "brier_cs": 0.21}]
+        self.assertIn("Log loss", render_html(r))
+
     def test_approximate_banner(self):
         seed(self.conn)
         page = render_html(build_report(self.conn, self.cfg, NOW))

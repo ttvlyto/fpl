@@ -35,7 +35,10 @@ code layout.
   play, and bench swaps for starters who got 0 minutes (each player locks at
   his own kickoff, so an unused starter can still be swapped for a bench
   player whose match hasn't started);
-- a **Report card**: how far off past projections were, week by week.
+- a **Report card**: week by week, how far off past projections were (players
+  who didn't play count as 0), how well they ordered players within each
+  position, the real points of the lineup you set vs the one this page suggested
+  vs the best possible from your roster, and how well the match odds did.
 
 Points are your league's exact scoring, computed from Sleeper's own weekly
 stats. If those are unavailable, or you set `"stats_source": "fpl"`, it falls
@@ -278,6 +281,11 @@ Details of `report.json` worth knowing:
 - `projection_note` is `"market"` (all fixtures priced), `"mixed"`, or
   `"difficulty"`.
 - `live` is `null` when there is no live game week.
+- `report_card` has `weeks` (per finished week: `n`, `mae_v1` over everyone,
+  `mae_v1_played`, `by_cat_v1` per outcome group `dnp`/`low`/`mid`/`haul`,
+  `rank_v1` and the v2 and `ep_next` comparisons), `decisions` (`set_pts`,
+  `tool_pts`, `best_pts` and swap outcomes), `matches` (`log_loss`, `rps`,
+  `brier_cs`) and `summary`. Each list keeps the last 8 weeks.
 - `matches` entries have `market: null`, or `"ok"` with `stale`, `p_home`,
   `p_draw`, `p_away`, `lam_home`, `lam_away`, `cs_home`, `cs_away`.
 - Player objects carry `sleeper_id`, `name`, `positions`, `club`, `flag`, `avg`,

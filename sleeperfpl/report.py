@@ -488,20 +488,50 @@ _FLAG_TEXT = {
 }
 
 
+def _rank(v):
+    return "–" if v is None else f"{v:.2f}"
+
+
 def _report_card(r):
     rc = r.get("report_card") or {}
-    rows = "".join(
-        f'<tr><td>GW{w["gw"]}</td><td class="num">{w["n"]}</td><td class="num">{_num(w["mae_v1"])}</td>'
-        f'<td class="num">{_num(w["mae_v2"])}</td>'
-        f'<td class="num">{"–" if w["brier_goal"] is None else format(w["brier_goal"], ".3f")} '
-        f'<small>({w["n_goal"]})</small></td></tr>' for w in rc.get("weeks", []))
-    head = ('<tr><th>Week</th><th class="num">Players</th><th class="num">Avg miss v1</th>'
-            '<th class="num">Avg miss v2</th><th class="num">Goal-odds score</th></tr>')
-    table = f'<div class="scroll"><table><thead>{head}</thead><tbody>{rows}</tbody></table></div>' if rows else ""
-    return (f'<div class="card"><h2>Report card</h2>{table}<div class="muted" style="margin-top:6px">'
-            f'{_e(rc.get("summary", "not enough weeks yet"))}. Avg miss = average points the projection was off by '
-            f'(lower is better). Goal-odds score = how well market goal odds predicted scorers (Brier; lower is better).'
-            f'</div></div>')
+    decisions = {d["gw"]: d for d in rc.get("decisions", [])}
+    show_xi = bool(decisions)
+    rows = []
+    for w in rc.get("weeks", []):
+        d = decisions.get(w["gw"])
+        xi = "".join(f'<td class="num">{_num(d[k]) if d else "–"}</td>' for k in ("set_pts", "tool_pts", "best_pts"))
+        rows.append(
+            f'<tr><td>GW{w["gw"]}</td><td class="num">{w["n"]}</td><td class="num">{_num(w["mae_v1"])}</td>'
+            f'<td class="num">{_num(w.get("mae_v1_played"))}</td><td class="num">{_num(w["mae_v2"])}</td>'
+            f'<td class="num">{_rank(w.get("rank_v1"))}</td>'
+            f'<td class="num">{"–" if w["brier_goal"] is None else format(w["brier_goal"], ".3f")} '
+            f'<small>({w["n_goal"]})</small></td>{xi if show_xi else ""}</tr>')
+    head = ('<tr><th>Week</th><th class="num">Players</th><th class="num">Avg miss (all)</th>'
+            '<th class="num">Avg miss (played)</th><th class="num">Avg miss v2</th><th class="num">Order (v1)</th>'
+            '<th class="num">Goal-odds score</th>'
+            + ('<th class="num">Your XI</th><th class="num">Tool XI</th><th class="num">Best XI</th>' if show_xi else "")
+            + '</tr>')
+    table = f'<div class="scroll"><table><thead>{head}</thead><tbody>{"".join(rows)}</tbody></table></div>' if rows else ""
+    matches = rc.get("matches") or []
+    mtable = ""
+    if matches:
+        mrows = "".join(f'<tr><td>GW{m["gw"]}</td><td class="num">{m["n"]}</td>'
+                        f'<td class="num">{m["log_loss"]:.3f}</td><td class="num">{m["rps"]:.3f}</td>'
+                        f'<td class="num">{m["brier_cs"]:.3f}</td></tr>' for m in matches)
+        mtable = ('<h2 style="margin-top:12px">Match odds</h2><div class="scroll"><table><thead><tr><th>Week</th>'
+                  '<th class="num">Matches</th><th class="num">Log loss</th><th class="num">RPS</th>'
+                  f'<th class="num">Clean-sheet score</th></tr></thead><tbody>{mrows}</tbody></table></div>')
+    notes = ['Avg miss = average points the projection was off by (lower is better); "all" counts players who '
+             "didn't play as 0 points.",
+             "Order = how well the projection ranked players within each position, from −1 to 1 (higher is better).",
+             "Goal-odds score = how well market goal odds predicted scorers (Brier; lower is better)."]
+    if show_xi:
+        notes.append("Your XI / Tool XI / Best XI = real points of the lineup you set, the lineup this page suggested, "
+                     "and the best lineup possible from your roster.")
+    if matches:
+        notes.append("Log loss, RPS and clean-sheet score grade the match odds against results (lower is better).")
+    return (f'<div class="card"><h2>Report card</h2>{table}{mtable}<div class="muted" style="margin-top:6px">'
+            f'{_e(rc.get("summary", "not enough weeks yet"))}. {_e(" ".join(notes))}</div></div>')
 
 
 def _live_card(r):
