@@ -16,11 +16,10 @@ from .matching import load_overrides, match_players
 from .metrics import Scored, category, error_summary, mean, position_group, rank_by_position
 from .projection import project
 from .scoring_map import flatten_scoring_settings
-from .sleeper_stats import sleeper_points
+from .sleeper_stats import irregular_week, sleeper_points
 
 NEUTRAL = 0           # difficulty meaning "no fixture data": v1 uses multiplier 1.0
 SAMPLE_WEEKS = 5      # scored only if he played in one of the 5 weeks before
-CLUBS = 20
 CANNOT_REPLAY = ["v2 and market numbers (no historical odds stored)",
                  "injury and status flags (no point-in-time snapshots)",
                  "lineup and swap decisions (no historical rosters or recommendations)"]
@@ -53,12 +52,6 @@ METHODS: dict[str, Callable[[BacktestInput, object], float]] = {"v1": _v1, "seas
 
 def _played(stats):
     return stats is not None and (stats.get("min") or 0) > 0
-
-
-def _irregular(rows):
-    """A past-season week where some club played twice or not at all (from Sleeper's TEAM_ rows)."""
-    teams = [s for pid, s in rows.items() if pid.startswith("TEAM_")]
-    return any((s.get("gp") or 0) != 1 for s in teams) or sum(1 for s in teams if (s.get("gp") or 0) >= 1) < CLUBS
 
 
 def _current_fixtures(conn, cfg, players):
@@ -117,7 +110,7 @@ def run_backtest(conn, cfg, seasons=None):
             rows = stats.get(gw)
             if not rows:
                 continue
-            if not is_current and _irregular(rows):
+            if not is_current and irregular_week(rows):
                 irregular.append(gw)
                 continue
             by_club = fixtures_for(gw) if fixtures_for else {}

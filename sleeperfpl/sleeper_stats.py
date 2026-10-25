@@ -58,6 +58,15 @@ def fetch_sleeper_stats(conn, sport, season, last_week, *, force=False, get=get_
     return fetched
 
 
+CLUBS = 20
+
+
+def irregular_week(rows):
+    """A week where some club played twice or not at all (from Sleeper's TEAM_ rows)."""
+    teams = [s for pid, s in rows.items() if pid.startswith("TEAM_")]
+    return any((s.get("gp") or 0) != 1 for s in teams) or sum(1 for s in teams if (s.get("gp") or 0) >= 1) < CLUBS
+
+
 def has_stats(conn, season):
     return conn.execute("SELECT 1 FROM sleeper_stats WHERE season = ? LIMIT 1", (season,)).fetchone() is not None
 
